@@ -1,0 +1,73 @@
+Tinymods Source License 1.0
+
+Copyright (c) 2026 Tinymods.
+All rights reserved.
+
+This software and its source code are publicly available for viewing,
+learning, evaluation, and personal non-commercial experimentation.
+
+1. PERMITTED USE
+
+You may:
+
+- view and study the source code;
+- download or fork the repository for personal and educational purposes;
+- modify the software for your own private, non-commercial use;
+- use individual ideas, techniques, and general programming concepts learned
+  from the source code, provided that such use does not reproduce substantial
+  portions of the Tinymods source code.
+
+2. RESTRICTIONS
+
+Without prior written permission from the copyright holder, you may not:
+
+- sell, sublicense, redistribute, or commercially exploit this software or
+  substantial portions of its source code;
+- operate a commercial hosted service, SaaS product, website, application,
+  API, or other service substantially based on this software;
+- create or distribute a competing image optimization service substantially
+  derived from Tinymods;
+- rebrand, white-label, or redistribute Tinymods as your own product;
+- remove or alter copyright, attribution, or license notices;
+- use the Tinymods name, logo, trademarks, or branding in a way that suggests
+  endorsement, affiliation, or ownership.
+
+3. COMMERCIAL LICENSING
+
+Commercial use, redistribution, integration into commercial products,
+white-label use, or creation of hosted services based substantially on this
+software requires separate written permission from the copyright holder.
+
+4. THIRD-PARTY SOFTWARE
+
+This repository may contain or depend upon third-party libraries, packages,
+code, and other components.
+
+Such third-party materials remain subject to their respective licenses and
+copyright notices. This license does not replace, modify, or restrict the
+rights granted by third-party licenses.
+
+5. CONTRIBUTIONS
+
+Unless separately agreed in writing, submitting a contribution to this
+repository does not transfer ownership of the Tinymods project or grant
+commercial rights to the contributor.
+
+6. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+7. RESERVATION OF RIGHTS
+
+Any rights not expressly granted by this license are reserved by the
+copyright holder.
+
+Public availability of the source code does not place this software in the
+public domain and does not make it open-source software under an OSI-approved
+license.

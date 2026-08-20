@@ -155,8 +155,7 @@ export default function Home() {
           <span>изображений для сайта</span>
         </h1>
         <p>
-          Сжимайте фотографии и скриншоты, конвертируйте PNG, JPEG и HEIC в
-          лёгкие AVIF, WebP и lossless PNG — прямо в браузере без загрузки на сервер.
+          Сжимайте изображения, задавайте нужные размеры и готовьте версии для разных экранов — всё для сайта в одном инструменте.
         </p>
         <p className="accepted-formats" aria-label="Поддерживаемые исходные форматы">
           Принимаем <strong>PNG</strong><span>·</span><strong>JPEG</strong><span>·</span>

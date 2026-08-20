@@ -4,7 +4,7 @@ import {
   calculateGeometryCleanliness,
   countSvgNodes,
   reconstructSvgGeometry,
-} from "./reconstruction-engine.ts";
+} from "./reconstruction-engine";
 
 export type TraceDetail = "compact" | "balanced" | "precise";
 export type TracePreset = "auto" | "line-icon" | "logo" | "illustration";
@@ -159,16 +159,12 @@ function alphaMask(imageData: ImageData, threshold: number) {
 }
 
 function compatibleImageData(width: number, height: number, data: Uint8ClampedArray) {
-  return typeof ImageData === "undefined"
-    ? { width, height, data } as ImageData
-    : new ImageData(data, width, height);
+return typeof ImageData === "undefined"
+  ? ({ width, height, data } as ImageData)
+  : new ImageData(new Uint8ClampedArray(data), width, height);
 }
 
-/**
- * Converts any monochrome transparent raster to one canonical RGB color while
- * preserving alpha byte-for-byte. Geometry and quality ranking can then depend
- * only on the silhouette, never on whether the uploaded icon was black or white.
- */
+
 export function canonicalizeMonochromeAlpha(imageData: ImageData, inkColor = "#000000") {
   const [red, green, blue] = colorToRgb(inkColor);
   const data = new Uint8ClampedArray(imageData.data.length);
