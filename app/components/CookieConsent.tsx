@@ -2,92 +2,212 @@
 
 import { useEffect, useState } from "react";
 
-type ConsentValue = "all" | "necessary";
+const METRIKA_ID = 111792380;
+const STORAGE_KEY = "optima-cookie-consent-v1";
+const OPEN_COOKIE_SETTINGS_EVENT = "optima:open-cookie-settings";
 
-const STORAGE_KEY = "optima-cookie-consent";
-const CONSENT_LIFETIME = 365 * 24 * 60 * 60 * 1000;
-const CONSENT_VERSION = 1;
+type ConsentChoice = "analytics" | "necessary" | "dismissed";
 
-type StoredConsent = {
-  version: number;
-  value: ConsentValue;
-  expiresAt: number;
-};
-
-function saveConsent(value: ConsentValue) {
-  const consent: StoredConsent = {
-    version: CONSENT_VERSION,
-    value,
-    expiresAt: Date.now() + CONSENT_LIFETIME,
-  };
-
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(consent));
-  window.dispatchEvent(new CustomEvent("optima:consent-change", { detail: consent }));
+declare global {
+  interface Window {
+    ym?: {
+      (...args: unknown[]): void;
+      a?: unknown[][];
+      l?: number;
+    };
+    __optimaMetrikaInitialized?: boolean;
+  }
 }
 
-function hasActiveConsent() {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return false;
-
+function readConsent(): ConsentChoice | null {
   try {
-    const consent = JSON.parse(raw) as StoredConsent;
-    if (consent.version === CONSENT_VERSION && consent.expiresAt > Date.now()) return true;
+    const value = window.localStorage.getItem(STORAGE_KEY);
+
+    if (
+      value === "analytics" ||
+      value === "necessary" ||
+      value === "dismissed"
+    ) {
+      return value;
+    }
+
+    return null;
   } catch {
-    // A damaged preference is replaced through the normal consent flow.
+    return null;
+  }
+}
+
+function saveConsent(choice: ConsentChoice) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, choice);
+  } catch {
+    // Если localStorage недоступен, просто закрываем баннер в текущей сессии.
+  }
+}
+
+function loadYandexMetrika() {
+  if (typeof window === "undefined") return;
+
+  if (window.__optimaMetrikaInitialized) return;
+
+  window.__optimaMetrikaInitialized = true;
+
+  window.ym =
+    window.ym ||
+    function (...args: unknown[]) {
+      window.ym!.a = window.ym!.a || [];
+      window.ym!.a.push(args);
+    };
+
+  window.ym.l = Date.now();
+
+  const scriptSrc = `https://mc.yandex.ru/metrika/tag.js?id=${METRIKA_ID}`;
+
+  const existingScript = Array.from(document.scripts).find(
+    (script) => script.src === scriptSrc,
+  );
+
+  if (!existingScript) {
+    const script = document.createElement("script");
+
+    script.id = "yandex-metrika";
+    script.async = true;
+    script.src = scriptSrc;
+
+    document.head.appendChild(script);
   }
 
-  window.localStorage.removeItem(STORAGE_KEY);
-  return false;
+  window.ym(METRIKA_ID, "init", {
+    ssr: true,
+    webvisor: true,
+    clickmap: true,
+    ecommerce: "dataLayer",
+    referrer: document.referrer,
+    url: window.location.href,
+    accurateTrackBounce: true,
+    trackLinks: true,
+  });
 }
 
 export function CookieConsent() {
-  const [isOpen, setIsOpen] = useState(false);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const initialCheck = window.setTimeout(() => setIsOpen(!hasActiveConsent()), 0);
+    const consent = readConsent();
 
-    const openSettings = () => setIsOpen(true);
-    window.addEventListener("optima:open-cookie-settings", openSettings);
+    if (consent === "analytics") {
+      loadYandexMetrika();
+      setVisible(false);
+    } else if (consent === "necessary" || consent === "dismissed") {
+      setVisible(false);
+    } else {
+      setVisible(true);
+    }
+
+    const openSettings = () => {
+      setVisible(true);
+    };
+
+    window.addEventListener(
+      OPEN_COOKIE_SETTINGS_EVENT,
+      openSettings,
+    );
+
     return () => {
-      window.clearTimeout(initialCheck);
-      window.removeEventListener("optima:open-cookie-settings", openSettings);
+      window.removeEventListener(
+        OPEN_COOKIE_SETTINGS_EVENT,
+        openSettings,
+      );
     };
   }, []);
 
-  if (!isOpen) return null;
+  function allowAnalytics() {
+    saveConsent("analytics");
+    loadYandexMetrika();
+    setVisible(false);
+  }
 
-  const choose = (value: ConsentValue) => {
-    saveConsent(value);
-    setIsOpen(false);
-  };
+  function useNecessaryOnly() {
+    saveConsent("necessary");
+    setVisible(false);
+  }
+
+  function dismissBanner() {
+    saveConsent("dismissed");
+    setVisible(false);
+  }
+
+  if (!visible) return null;
 
   return (
-    <aside className="cookie-consent" role="dialog" aria-modal="false" aria-labelledby="cookie-title">
+    <aside
+      className="cookie-consent"
+      aria-label="Настройки cookie"
+      role="dialog"
+      aria-live="polite"
+    >
+      <button
+        className="cookie-consent-close"
+        type="button"
+        onClick={dismissBanner}
+        aria-label="Закрыть настройки cookie"
+        title="Закрыть"
+      >
+        ×
+      </button>
+
       <div>
-        <span className="cookie-consent-mark" aria-hidden="true">O</span>
+        <span className="cookie-consent-mark" aria-hidden="true">
+          O
+        </span>
+
         <div>
-          <strong id="cookie-title">Настройки cookie</strong>
+          <strong>Настройки cookie</strong>
+
           <p>
-            Сейчас Optima хранит только ваш выбор. Когда появится аналитика, она будет
-            включаться после согласия. Изображения по-прежнему останутся в браузере.
+            Optima сохраняет ваш выбор на устройстве. Яндекс Метрика
+            включается только после вашего согласия. Изображения
+            по-прежнему обрабатываются локально в браузере.
           </p>
-          <a href="/privacy#cookies">Подробнее в политике</a>
+
+          <a href="/privacy">
+            Подробнее в политике
+          </a>
         </div>
       </div>
+
       <div className="cookie-consent-actions">
-        <button type="button" onClick={() => choose("necessary")}>Только необходимые</button>
-        <button type="button" className="is-primary" onClick={() => choose("all")}>Разрешить аналитику</button>
+        <button
+          type="button"
+          onClick={useNecessaryOnly}
+        >
+          Только необходимые
+        </button>
+
+        <button
+          type="button"
+          className="is-primary"
+          onClick={allowAnalytics}
+        >
+          Разрешить аналитику
+        </button>
       </div>
     </aside>
   );
 }
 
 export function CookieSettingsButton() {
+  function openSettings() {
+    window.dispatchEvent(
+      new CustomEvent(OPEN_COOKIE_SETTINGS_EVENT),
+    );
+  }
+
   return (
     <button
-      className="cookie-settings-button"
       type="button"
-      onClick={() => window.dispatchEvent(new Event("optima:open-cookie-settings"))}
+      className="cookie-settings-button"
+      onClick={openSettings}
     >
       Настройки cookie
     </button>

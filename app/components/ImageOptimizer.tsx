@@ -1491,105 +1491,116 @@ export default function ImageOptimizer() {
   const selectedPackageFileCount = selectedPackageFiles.length;
 
   return (
-    <>
-    <div className={`optimizer-shell ${result ? "has-results" : ""}`}>
-      <div className="optimizer-topline">
-        <span>
-          {batchItems.length
-            ? `Очередь · ${batchItems.length} из ${MAX_BATCH_FILES}`
-            : `Пакетная загрузка · до ${MAX_BATCH_FILES} фото`}
-        </span>
-        <span className="local-badge">
-          <i aria-hidden="true" /> Обработка в браузере
-        </span>
-      </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPTED_INPUT}
-        onChange={handleInput}
-        multiple
-        disabled={addingFiles || working || batchItems.length >= MAX_BATCH_FILES}
-        hidden
-      />
+  <>
+    <input
+      ref={inputRef}
+      type="file"
+      accept={ACCEPTED_INPUT}
+      onChange={handleInput}
+      multiple
+      disabled={addingFiles || working || batchItems.length >= MAX_BATCH_FILES}
+      hidden
+    />
 
-      <fieldset className="processing-mode" disabled={working}>
-        <legend>Режим обработки</legend>
-        <label className={optimizationMode === "photo" ? "is-active" : ""}>
-          <input
-            type="radio"
-            name="optimization-mode"
-            value="photo"
-            checked={optimizationMode === "photo"}
-            onChange={() => {
-              setOptimizationMode("photo");
-              invalidateBatchResults();
-            }}
-          />
-          <span>
-            <strong>Фото</strong>
-            <small>Минимальный вес с контролем деталей</small>
-          </span>
-          <i aria-hidden="true">◉</i>
-        </label>
-        <label className={optimizationMode === "screenshot" ? "is-active" : ""}>
-          <input
-            type="radio"
-            name="optimization-mode"
-            value="screenshot"
-            checked={optimizationMode === "screenshot"}
-            onChange={() => {
-              setOptimizationMode("screenshot");
-              invalidateBatchResults();
-            }}
-          />
-          <span>
-            <strong>Скриншот</strong>
-            <small>Строгая проверка текста, линий и интерфейса</small>
-          </span>
-          <i aria-hidden="true">▤</i>
-        </label>
-      </fieldset>
-
-      <div className="upload-panel">
-          <div
-            className={`dropzone ${dragging ? "is-dragging" : ""} ${batchItems.length >= MAX_BATCH_FILES ? "is-disabled" : ""}`}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={() => setDragging(false)}
-            onDrop={handleDrop}
-            onClick={() => inputRef.current?.click()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                inputRef.current?.click();
-              }
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            <div className="upload-icon" aria-hidden="true"><span>↑</span></div>
-            <strong>
-              {addingFiles
-                ? "Добавляем изображения…"
-                : batchItems.length
-                  ? `Добавить ещё · ${batchItems.length} из ${MAX_BATCH_FILES}`
-                  : `Загрузите до ${MAX_BATCH_FILES} изображений`}
-            </strong>
-            <p>
-              Перетащите файлы сюда или нажмите, чтобы выбрать изображения
-              на компьютере
-            </p>
-            <small>
-              PNG · JPEG · HEIC / HEIF · WebP · AVIF · до 40 МБ каждый
-            </small>
+    {!file || !sourceInfo ? (
+      <section className="optimizer-upload-landing">
+        <div
+          className={`dropzone dropzone-landing ${dragging ? "is-dragging" : ""}`}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              inputRef.current?.click();
+            }
+          }}
+          role="button"
+          tabIndex={0}
+        >
+          <div className="upload-icon" aria-hidden="true">
+            <span>↑</span>
           </div>
-      </div>
 
-      {file && sourceInfo ? (
-        <div className="optimizer-body">
+          <strong>
+            {addingFiles
+              ? "Добавляем изображения…"
+              : `Загрузите до ${MAX_BATCH_FILES} изображений`}
+          </strong>
+
+          <p>
+            Перетащите файлы сюда или нажмите, чтобы выбрать изображения
+          </p>
+
+          <small>
+            PNG · JPEG · HEIC / HEIF · WebP · AVIF · до 40 МБ каждый
+          </small>
+        </div>
+      </section>
+    ) : (
+      <div className={`optimizer-shell ${result ? "has-results" : ""}`}>
+        <div className="optimizer-topline">
+          <span>
+            Очередь · {batchItems.length} из {MAX_BATCH_FILES}
+          </span>
+
+          <span className="local-badge">
+            <i aria-hidden="true" /> Обработка в браузере
+          </span>
+        </div>
+
+        <fieldset className="processing-mode" disabled={working}>
+          <legend>Режим обработки</legend>
+
+          <label className={optimizationMode === "photo" ? "is-active" : ""}>
+            <input
+              type="radio"
+              name="optimization-mode"
+              value="photo"
+              checked={optimizationMode === "photo"}
+              onChange={() => {
+                setOptimizationMode("photo");
+                invalidateBatchResults();
+              }}
+            />
+
+            <span>
+              <strong>Фото</strong>
+              <small>Минимальный вес с контролем деталей</small>
+            </span>
+
+            <i aria-hidden="true">◉</i>
+          </label>
+
+          <label
+            className={optimizationMode === "screenshot" ? "is-active" : ""}
+          >
+            <input
+              type="radio"
+              name="optimization-mode"
+              value="screenshot"
+              checked={optimizationMode === "screenshot"}
+              onChange={() => {
+                setOptimizationMode("screenshot");
+                invalidateBatchResults();
+              }}
+            />
+
+            <span>
+              <strong>Скриншот</strong>
+              <small>Строгая проверка текста, линий и интерфейса</small>
+            </span>
+
+            <i aria-hidden="true">▤</i>
+          </label>
+        </fieldset>
+
+
+<div className="optimizer-body">
           <section className="batch-queue" aria-label="Очередь фотографий">
             <header className="batch-queue-header">
               <span>
@@ -2239,7 +2250,7 @@ export default function ImageOptimizer() {
             </div>
           )}
         </div>
-      ) : null}
+
 
       {error ? <p className="error-message">{error}</p> : null}
 
@@ -2674,9 +2685,13 @@ export default function ImageOptimizer() {
             Обычная загрузка отправляет отмеченные файлы по отдельности. ZIP собирается
             прямо в браузере и не передаёт изображения на сервер.
           </p>
+
+          {error ? <p className="error-message">{error}</p> : null}
+
         </section>
       ) : null}
     </div>
+       )}
     </>
   );
 }
