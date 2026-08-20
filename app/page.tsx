@@ -1,7 +1,7 @@
 import ImageOptimizer from "./components/ImageOptimizer";
 import { CookieConsent, CookieSettingsButton } from "./components/CookieConsent";
 
-const SITE_URL = "https://smart-image-optimizer.lynnkirsch.chatgpt.site";
+const SITE_URL = "https://tinymods.ru";
 
 type FaqItem = {
   question: string;

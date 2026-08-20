@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const SITE_URL = "https://smart-image-optimizer.lynnkirsch.chatgpt.site";
+const SITE_URL = "https://tinymods.ru";
 const SEO_TITLE = "Умный оптимизатор изображений для сайта — Optima";
 const SEO_DESCRIPTION =
   "Бесплатно сжимайте и конвертируйте PNG, JPEG, HEIC, WebP и AVIF для сайта. Фото и скриншоты обрабатываются в браузере без загрузки на сервер.";

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CookieConsent, CookieSettingsButton } from "../components/CookieConsent";
 
-const CURRENT_SITE_URL = "https://smart-image-optimizer.lynnkirsch.chatgpt.site";
+const CURRENT_SITE_URL = "https://tinymods.ru";
 
 export const metadata: Metadata = {
   title: "Политика обработки персональных данных — Optima",
