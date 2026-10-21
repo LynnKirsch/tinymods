@@ -1,23 +1,27 @@
 import ssim from "ssim.js";
+import { decodeHeicBitmap, isHeicFile } from "./heic-decoder";
 
 export type UsageProfile =
-  | "hero"
-  | "two-columns"
-  | "three-columns"
-  | "four-columns"
-  | "five-columns"
+  | "480-640"
+  | "768-1024"
+  | "1280-1440"
+  | "1680-1920"
   | "custom";
 export type OutputFormat = "avif" | "webp" | "png";
-type LossyOutputFormat = Exclude<OutputFormat, "png">;
-export type OptimizationMode = "photo" | "screenshot";
-export type QualityTier = "lighter" | "recommended" | "detail";
-export type QualitySelection = Partial<Record<OutputFormat, QualityTier>>;
-export type ArchiveFileSelection = `${OutputFormat}:${number}`;
+export type OptimizationMode = "photo" | "screenshot" | "transparent-png";
+export type QualityTier = "q65" | "q80" | "q85" | "custom";
+export const MAX_BATCH_FILES = 10;
+
+export function getUploadCandidates<T>(files: T[], existingCount: number) {
+  return files.slice(0, Math.max(0, MAX_BATCH_FILES - existingCount));
+}
 
 export interface CropSettings {
   aspectRatio: number | null;
   positionX: number;
   positionY: number;
+  // Fractions of the original image; position remains independent of size.
+  size?: { width: number; height: number };
 }
 
 export interface CropRect {
@@ -41,8 +45,7 @@ export interface EncodedVariant {
   extension: string;
   blob: Blob;
   size: number;
-  quality: number;
-  tier: QualityTier;
+  quality: number | null;
   similarity: number | null;
   similarityMethod: "ssim" | "pixel" | "unavailable";
   fileName: string;
@@ -52,7 +55,6 @@ export interface WidthResult {
   width: number;
   height: number;
   variants: EncodedVariant[];
-  recommended: EncodedVariant;
 }
 
 export interface OptimizationResult {
@@ -62,164 +64,123 @@ export interface OptimizationResult {
   originalSize: number;
   profile: ImageProfile;
   crop: CropSettings;
-  threshold: number;
   mode: OptimizationMode;
   results: WidthResult[];
   warnings: string[];
 }
 
+export interface PreparedPng {
+  file: File;
+  key: string;
+  originalWidth: number;
+  originalHeight: number;
+  outputs: Array<{ width: number; height: number; blob: Blob; fileName: string }>;
+}
+
+export function preparedPngKey(crop: CropSettings, profile: ImageProfile) {
+  return JSON.stringify([crop.aspectRatio, crop.positionX, crop.positionY, crop.size ?? null, profile.widths]);
+}
+
+// Encode the target bytes directly: no Canvas premultiplication round trip.
+export async function encodeRgbaPng(data: ImageData): Promise<Blob> {
+  if (typeof CompressionStream === "undefined") {
+    throw new Error("Браузер не поддерживает точное сохранение PNG (CompressionStream).");
+  }
+  const { width, height } = data;
+  const stride = width * 4;
+  const rows = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    rows.set(data.data.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+  }
+  const compressed = new Uint8Array(await new Response(
+    new Blob([rows]).stream().pipeThrough(new CompressionStream("deflate")),
+  ).arrayBuffer());
+  function chunk(name: string, payload: Uint8Array<ArrayBuffer>) {
+    const bytes = new Uint8Array(payload.length + 12);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, payload.length);
+    for (let i = 0; i < 4; i += 1) bytes[4 + i] = name.charCodeAt(i);
+    bytes.set(payload, 8);
+    let crc = 0xffffffff;
+    for (let i = 4; i < bytes.length - 4; i += 1) {
+      crc ^= bytes[i];
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+    view.setUint32(bytes.length - 4, (crc ^ 0xffffffff) >>> 0);
+    return bytes;
+  }
+  const header = new Uint8Array(13);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  header[8] = 8;
+  header[9] = 6; // 8-bit RGBA, including hidden RGB under alpha=0.
+  return new Blob([
+    new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header), chunk("IDAT", compressed), chunk("IEND", new Uint8Array()),
+  ], { type: "image/png" });
+}
+
+export async function prepareTransparentPng(options: {
+  file: File; profile: ImageProfile; crop: CropSettings; prepared?: PreparedPng | null;
+}): Promise<PreparedPng> {
+  const { file, profile, crop, prepared } = options;
+  const key = preparedPngKey(crop, profile);
+  if (prepared?.file === file && prepared.key === key) return prepared;
+  const bitmap = await createSourceBitmap(file);
+  try {
+    if (bitmap.width * bitmap.height > 50_000_000) throw new Error("Изображение больше 50 мегапикселей.");
+    const rect = calculateCropRect(bitmap.width, bitmap.height, crop);
+    const widths = buildTargetWidths(rect.width, profile);
+    if (!widths.length) throw new Error("Выбранные размеры недоступны без увеличения кадра.");
+    const outputs: PreparedPng["outputs"] = [];
+    for (const width of widths) {
+      const { height } = calculateOutputDimensions(rect, width);
+      const raster = width <= rect.width && height <= rect.height && (width < rect.width || height < rect.height)
+        ? await resizeGraphicsPng(bitmap, rect, width)
+        : createResizedCanvas(bitmap, rect, width).getContext("2d")!.getImageData(0, 0, width, height);
+      const blob = await encodeRgbaPng(raster);
+      outputs.push({ width, height, blob, fileName: createVariantFileName(width, height, "png", null) });
+    }
+    return { file, key, originalWidth: Math.round(rect.width), originalHeight: Math.round(rect.height), outputs };
+  } finally {
+    bitmap.close();
+  }
+}
+
 export const IMAGE_PROFILES: ImageProfile[] = [
-  {
-    id: "hero",
-    title: "Первый экран",
-    description: "Фотография на всю ширину окна",
-    widths: [1680, 1920],
-    sizes: "100vw",
-  },
-  {
-    id: "two-columns",
-    title: "Две колонки",
-    description: "Две крупные карточки в ряд",
-    widths: [1200, 1400],
-    sizes: "(min-width: 1024px) 50vw, 100vw",
-  },
-  {
-    id: "three-columns",
-    title: "Три колонки",
-    description: "Три карточки в ряд",
-    widths: [800, 1000],
-    sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
-  },
-  {
-    id: "four-columns",
-    title: "Четыре колонки",
-    description: "Четыре карточки в ряд",
-    widths: [600, 800],
-    sizes: "(min-width: 1200px) 25vw, (min-width: 640px) 50vw, 100vw",
-  },
-  {
-    id: "five-columns",
-    title: "Пять колонок",
-    description: "Пять компактных карточек в ряд",
-    widths: [480, 600],
-    sizes: "(min-width: 1440px) 20vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
-  },
-  {
-    id: "custom",
-    title: "Свой размер",
-    description: "Точная ширина конкретного блока",
-    widths: [360, 720],
-    sizes: "360px",
-  },
+  { id: "1680-1920", title: "1920 · 1680 px", description: "", widths: [1920, 1680], sizes: "100vw" },
+  { id: "1280-1440", title: "1440 · 1280 px", description: "", widths: [1440, 1280], sizes: "100vw" },
+  { id: "768-1024", title: "1024 · 768 px", description: "", widths: [1024, 768], sizes: "100vw" },
+  { id: "480-640", title: "640 · 480 px", description: "", widths: [640, 480], sizes: "100vw" },
+  { id: "custom", title: "СВОЙ РАЗМЕР", description: "", widths: [360], sizes: "360px" },
 ];
 
 export function getAvailableImageProfiles(maxWidth: number) {
   const safeMaxWidth = Math.max(1, Math.floor(maxWidth));
   return IMAGE_PROFILES.filter(
     (profile) =>
-      profile.id === "custom" || Math.max(...profile.widths) <= safeMaxWidth,
+      profile.id === "custom" || profile.widths.some((width) => width <= safeMaxWidth),
   );
 }
 
 export function createCustomProfile(
   width: number,
-  includeRetina: boolean,
   maxWidth = 2560,
 ) {
   const safeMaxWidth = Math.max(1, Math.min(2560, Math.floor(maxWidth)));
-  const exactWidth = Math.min(
-    safeMaxWidth,
-    Math.min(2560, Math.max(32, Math.round(width))),
-  );
-  const retinaWidth = exactWidth * 2;
+  const exactWidth = Math.round(width);
+  if (!Number.isFinite(width) || !Number.isInteger(width) || width < 32 || width > safeMaxWidth) {
+    throw new Error(`Укажите ширину от 32 до ${safeMaxWidth}px без увеличения.`);
+  }
   return {
     id: "custom",
     title: "Свой размер",
     description: `Блок шириной ${exactWidth}px`,
-    widths:
-      includeRetina && retinaWidth <= safeMaxWidth
-        ? [exactWidth, retinaWidth]
-        : [exactWidth],
+    widths: [exactWidth],
     sizes: `${exactWidth}px`,
   } satisfies ImageProfile;
 }
-
-export function createDetectedProfile(
-  widths: number[],
-  includeRetina: boolean,
-  maxWidth = 2560,
-) {
-  const safeMaxWidth = Math.max(1, Math.min(2560, Math.floor(maxWidth)));
-  const requestedWidths = [...new Set(widths)]
-    .map((width) => Math.min(2560, Math.max(32, Math.round(width))))
-    .filter((width) => width <= safeMaxWidth)
-    .sort((a, b) => a - b);
-  const exactWidths = requestedWidths.length ? requestedWidths : [safeMaxWidth];
-  const outputWidths = includeRetina
-    ? [
-        ...new Set([
-          ...exactWidths,
-          ...exactWidths
-            .map((width) => width * 2)
-            .filter((width) => width <= safeMaxWidth),
-        ]),
-      ]
-    : exactWidths;
-  return {
-    id: "custom",
-    title: "Размеры из кода блока",
-    description: `${exactWidths.length} ${exactWidths.length === 1 ? "размер" : "размера"} из кода`,
-    widths: outputWidths.sort((a, b) => a - b),
-    sizes: "100vw",
-  } satisfies ImageProfile;
-}
-
-const OPTIMIZE_CONFIG = {
-  threshold: 0.98,
-  search: {
-    avif: { min: 50, max: 70, fallback: 60 },
-    webp: { min: 68, max: 82, fallback: 75 },
-  },
-} satisfies {
-  threshold: number;
-  search: Record<LossyOutputFormat, { min: number; max: number; fallback: number }>;
-};
-
-const SCREENSHOT_CONFIG = {
-  threshold: 0.995,
-  search: {
-    avif: { min: 78, max: 90, fallback: 86 },
-    webp: { min: 88, max: 96, fallback: 92 },
-  },
-} satisfies typeof OPTIMIZE_CONFIG;
-
-export const AVIF_QUALITY_RANGE = {
-  lighter: 45,
-  automaticMin: 50,
-  automaticMax: 70,
-  detail: 80,
-} as const;
-
-export const WEBP_QUALITY_RANGE = {
-  lighter: 60,
-  automaticMin: 68,
-  automaticMax: 82,
-  detail: 85,
-} as const;
-
-export const SCREENSHOT_AVIF_QUALITY_RANGE = {
-  lighter: 70,
-  automaticMin: 78,
-  automaticMax: 90,
-  detail: 95,
-} as const;
-
-export const SCREENSHOT_WEBP_QUALITY_RANGE = {
-  lighter: 82,
-  automaticMin: 88,
-  automaticMax: 96,
-  detail: 100,
-} as const;
 
 const MIME: Record<OutputFormat, string> = {
   avif: "image/avif",
@@ -233,14 +194,18 @@ const EXTENSION: Record<OutputFormat, string> = {
   png: "png",
 };
 
-function safeBaseName(fileName: string) {
-  return (
-    fileName
-      .replace(/\.[^.]+$/, "")
-      .normalize("NFKD")
-      .replace(/[^a-zA-Z0-9а-яА-ЯёЁ_-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "image"
-  );
+export function createVariantFileName(
+  width: number,
+  height: number,
+  format: OutputFormat,
+  quality: number | null,
+  ordinal?: number,
+) {
+  const prefix = ordinal === undefined
+    ? "img"
+    : `img-${String(Math.max(1, Math.floor(ordinal))).padStart(2, "0")}`;
+  const qualityPart = format === "png" || quality === null ? "" : `-q${quality}`;
+  return `${prefix}-${width}x${height}${qualityPart}.${EXTENSION[format]}`;
 }
 
 export function formatBytes(bytes: number) {
@@ -256,11 +221,10 @@ export function formatBytes(bytes: number) {
 }
 
 export function buildTargetWidths(originalWidth: number, profile: ImageProfile) {
-  const maxProfileWidth = Math.max(...profile.widths);
-  const cappedOriginal = Math.min(originalWidth, maxProfileWidth);
-  const widths = profile.widths.filter((width) => width < cappedOriginal);
-  widths.push(cappedOriginal);
-  return [...new Set(widths)].sort((a, b) => a - b);
+  const availableWidth = Math.floor(originalWidth);
+  return [...new Set(profile.widths)]
+    .filter((width) => Number.isInteger(width) && width > 0 && width <= availableWidth)
+    .sort((a, b) => b - a);
 }
 
 export function selectResultWidth(
@@ -282,48 +246,6 @@ export function selectResultWidth(
   } satisfies OptimizationResult;
 }
 
-export function archiveFileSelectionKey(
-  format: OutputFormat,
-  width: number,
-): ArchiveFileSelection {
-  return `${format}:${width}`;
-}
-
-export function selectArchiveFiles(
-  result: OptimizationResult,
-  selectedFiles: ArchiveFileSelection[],
-  selection?: QualitySelection,
-) {
-  const selected = new Set(selectedFiles);
-  const results = result.results.flatMap((widthResult) => {
-    const variants = (["avif", "webp", "png"] as OutputFormat[]).flatMap((format) => {
-      if (!selected.has(archiveFileSelectionKey(format, widthResult.width))) return [];
-      const tier = selectedTier(selection, format);
-      const variant = widthResult.variants.find(
-        (item) => item.format === format && item.tier === tier,
-      ) ?? widthResult.variants.find(
-        (item) => item.format === format && item.tier === "recommended",
-      );
-      return variant ? [variant] : [];
-    });
-    if (!variants.length) return [];
-    const recommended = variants.includes(widthResult.recommended)
-      ? widthResult.recommended
-      : [...variants].sort((first, second) => first.size - second.size)[0];
-    return [{ ...widthResult, variants, recommended }];
-  });
-  const widths = results.map((item) => item.width);
-  return {
-    ...result,
-    profile: {
-      ...result.profile,
-      widths,
-      sizes: widths.length === 1 ? `${widths[0]}px` : result.profile.sizes,
-    },
-    results,
-  } satisfies OptimizationResult;
-}
-
 export function calculateCropRect(
   sourceWidth: number,
   sourceHeight: number,
@@ -331,28 +253,81 @@ export function calculateCropRect(
 ): CropRect {
   const positionX = Math.min(100, Math.max(0, crop.positionX)) / 100;
   const positionY = Math.min(100, Math.max(0, crop.positionY)) / 100;
-  const targetRatio = crop.aspectRatio;
-  const sourceRatio = sourceWidth / sourceHeight;
-
-  if (!targetRatio || Math.abs(sourceRatio - targetRatio) < 0.0001) {
-    return { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+  let width = sourceWidth * Math.min(1, Math.max(1 / sourceWidth, crop.size?.width ?? 1));
+  let height = sourceHeight * Math.min(1, Math.max(1 / sourceHeight, crop.size?.height ?? 1));
+  if (crop.aspectRatio && crop.aspectRatio > 0) {
+    if (width / height > crop.aspectRatio) width = height * crop.aspectRatio;
+    else height = width / crop.aspectRatio;
   }
-
-  if (sourceRatio > targetRatio) {
-    const width = sourceHeight * targetRatio;
-    return {
-      x: (sourceWidth - width) * positionX,
-      y: 0,
-      width,
-      height: sourceHeight,
-    };
-  }
-
-  const height = sourceWidth / targetRatio;
   return {
-    x: 0,
+    x: (sourceWidth - width) * positionX,
     y: (sourceHeight - height) * positionY,
-    width: sourceWidth,
+    width,
+    height,
+  };
+}
+
+export function calculateOutputDimensions(cropRect: CropRect, targetWidth: number) {
+  if (!Number.isInteger(targetWidth) || targetWidth < 1 || targetWidth > Math.floor(cropRect.width)) {
+    throw new Error("Выбранная ширина требует увеличения кадра.");
+  }
+  return {
+    width: targetWidth,
+    height: Math.max(1, Math.round((targetWidth / cropRect.width) * cropRect.height)),
+  };
+}
+
+export type CropResizeHandle = "n" | "s" | "e" | "w" | "nw" | "ne" | "sw" | "se";
+
+export function cropSettingsFromRect(
+  rect: CropRect,
+  sourceWidth: number,
+  sourceHeight: number,
+  aspectRatio: number | null,
+): CropSettings {
+  return {
+    aspectRatio,
+    positionX: sourceWidth > rect.width ? (rect.x / (sourceWidth - rect.width)) * 100 : 50,
+    positionY: sourceHeight > rect.height ? (rect.y / (sourceHeight - rect.height)) * 100 : 50,
+    size: { width: rect.width / sourceWidth, height: rect.height / sourceHeight },
+  };
+}
+
+// Resize from the pointer-down rectangle, with the opposite edge/corner anchored.
+export function resizeCropRect(
+  rect: CropRect,
+  handle: CropResizeHandle,
+  deltaX: number,
+  deltaY: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  aspectRatio: number | null,
+): CropRect {
+  const horizontal = handle.includes("w") ? -1 : handle.includes("e") ? 1 : 0;
+  const vertical = handle.includes("n") ? -1 : handle.includes("s") ? 1 : 0;
+  const anchorX = horizontal < 0 ? rect.x + rect.width : horizontal > 0 ? rect.x : rect.x + rect.width / 2;
+  const anchorY = vertical < 0 ? rect.y + rect.height : vertical > 0 ? rect.y : rect.y + rect.height / 2;
+  const maxWidth = horizontal < 0 ? anchorX : horizontal > 0 ? sourceWidth - anchorX : 2 * Math.min(anchorX, sourceWidth - anchorX);
+  const maxHeight = vertical < 0 ? anchorY : vertical > 0 ? sourceHeight - anchorY : 2 * Math.min(anchorY, sourceHeight - anchorY);
+  const wantedWidth = rect.width + horizontal * deltaX;
+  const wantedHeight = rect.height + vertical * deltaY;
+  let width = rect.width;
+  let height = rect.height;
+  if (horizontal && vertical) {
+    const ratio = aspectRatio && aspectRatio > 0 ? aspectRatio : rect.width / rect.height;
+    // Project both pointer axes onto one proportional size, then clamp that size.
+    const wanted = (wantedWidth + wantedHeight / ratio) / (1 + 1 / ratio ** 2);
+    const maximum = Math.min(maxWidth, maxHeight * ratio);
+    width = Math.min(maximum, Math.max(Math.min(32, maximum), wanted));
+    height = width / ratio;
+  } else {
+    if (horizontal) width = Math.min(maxWidth, Math.max(Math.min(32, maxWidth), wantedWidth));
+    if (vertical) height = Math.min(maxHeight, Math.max(Math.min(32, maxHeight), wantedHeight));
+  }
+  return {
+    x: horizontal < 0 ? anchorX - width : horizontal > 0 ? anchorX : anchorX - width / 2,
+    y: vertical < 0 ? anchorY - height : vertical > 0 ? anchorY : anchorY - height / 2,
+    width,
     height,
   };
 }
@@ -362,12 +337,9 @@ function createResizedCanvas(
   cropRect: CropRect,
   targetWidth: number,
 ) {
-  const targetHeight = Math.max(
-    1,
-    Math.round((targetWidth / cropRect.width) * cropRect.height),
-  );
+  const { width: outputWidth, height: targetHeight } = calculateOutputDimensions(cropRect, targetWidth);
   const canvas = document.createElement("canvas");
-  canvas.width = targetWidth;
+  canvas.width = outputWidth;
   canvas.height = targetHeight;
   const context = canvas.getContext("2d", {
     alpha: true,
@@ -390,7 +362,163 @@ function createResizedCanvas(
   return canvas;
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+function lanczos3(distance: number) {
+  const x = Math.abs(distance);
+  if (x === 0) return 1;
+  if (x >= 3) return 0;
+  const angle = Math.PI * x;
+  return (Math.sin(angle) / angle) * (Math.sin(angle / 3) / (angle / 3));
+}
+
+async function resizeGraphicsPng(source: ImageBitmap, crop: CropRect, targetWidth: number) {
+  const { width, height } = calculateOutputDimensions(crop, targetWidth);
+  if (width > crop.width || height > crop.height || (width === crop.width && height === crop.height)) {
+    throw new Error("Lanczos применяется только при уменьшении изображения.");
+  }
+  let deadline = performance.now() + 12;
+  const yieldIfNeeded = async () => {
+    if (performance.now() < deadline) return;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    deadline = performance.now() + 12;
+  };
+  const axis = async (offset: number, extent: number, count: number, index: number, limit: number) => {
+    const scale = extent / count;
+    const center = offset + (index + 0.5) * scale - 0.5;
+    const first = Math.ceil(center - 3 * scale);
+    const last = Math.floor(center + 3 * scale);
+    const weights = new Float64Array(last - first + 1);
+    let sum = 0;
+    for (let i = first; i <= last; i++) {
+      sum += weights[i - first] = lanczos3((i - center) / scale);
+      if ((i - first + 1) % 16384 === 0) await yieldIfNeeded();
+    }
+    for (let i = 0; i < weights.length; i++) weights[i] /= sum;
+    return {
+      first, last, weights,
+      footprintFirst: Math.max(0, Math.floor(offset + index * scale)),
+      footprintLast: Math.min(limit - 1, Math.ceil(offset + (index + 1) * scale) - 1),
+    };
+  };
+  type Axis = Awaited<ReturnType<typeof axis>>;
+  const horizontalAxes = new Map<number, Axis>();
+  let coefficientBytes = 0;
+  const rows = new Map<number, { pixels: Float32Array; bounds: Uint8Array }>();
+  const tiles = new Map<string, ImageData>();
+  let currentTile: ImageData | undefined;
+  let currentTileX = -1, currentTileY = -1;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { alpha: true, willReadFrequently: true });
+  if (!context) throw new Error("Не удалось прочитать пиксели изображения.");
+  // At most eight 1024x64 tiles (2 MiB), read 1:1. No Canvas resize.
+  const pixel = (x: number, y: number) => {
+    const tx = Math.floor(x / 1024) * 1024;
+    const ty = Math.floor(y / 64) * 64;
+    const key = tx === currentTileX && ty === currentTileY ? "" : `${tx}:${ty}`;
+    let tile = key === "" ? currentTile : tiles.get(key);
+    if (!tile) {
+      canvas.width = Math.min(1024, source.width - tx);
+      canvas.height = Math.min(64, source.height - ty);
+      context.drawImage(source, tx, ty, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+      tile = context.getImageData(0, 0, canvas.width, canvas.height);
+      if (tiles.size === 8) tiles.delete(tiles.keys().next().value!);
+      tiles.set(key, tile);
+    }
+    currentTile = tile; currentTileX = tx; currentTileY = ty;
+    return { data: tile.data, offset: ((y - ty) * tile.width + x - tx) * 4, endX: tx + tile.width };
+  };
+  const horizontalRow = async (y: number) => {
+    const pixels = new Float32Array(width * 4);
+    // Per-source-row footprint extrema: min/max RGBA, ignoring hidden RGB.
+    const bounds = new Uint8Array(width * 8);
+    for (let x = 0; x < width; x++) {
+      let taps = horizontalAxes.get(x);
+      if (!taps) {
+        taps = await axis(crop.x, crop.width, width, x, source.width);
+        if (coefficientBytes + taps.weights.byteLength <= 1024 * 1024) {
+          horizontalAxes.set(x, taps);
+          coefficientBytes += taps.weights.byteLength;
+        }
+      }
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let i = taps.first; i <= taps.last;) {
+        const sx = Math.max(0, Math.min(source.width - 1, i));
+        const sample = pixel(sx, y);
+        const end = i < 0 ? Math.min(-1, taps.last)
+          : i >= source.width ? taps.last : Math.min(sample.endX - 1, taps.last);
+        let offset = sample.offset;
+        for (; i <= end; i++) {
+          const aw = sample.data[offset + 3] / 255 * taps.weights[i - taps.first];
+          r += sample.data[offset] * aw; g += sample.data[offset + 1] * aw; b += sample.data[offset + 2] * aw; a += aw;
+          if (i >= 0 && i < source.width - 1) offset += 4;
+        }
+      }
+      pixels.set([r, g, b, a], x * 4);
+      const base = x * 8;
+      bounds.set([255, 0, 255, 0, 255, 0, 255, 0], base);
+      for (let i = taps.footprintFirst; i <= taps.footprintLast;) {
+        const sample = pixel(i, y);
+        const end = Math.min(sample.endX - 1, taps.footprintLast);
+        let offset = sample.offset;
+        for (; i <= end; i++, offset += 4) {
+          for (let c = 0; c < 4; c++) {
+            if (c < 3 && sample.data[offset + 3] === 0) continue;
+            bounds[base + c * 2] = Math.min(bounds[base + c * 2], sample.data[offset + c]);
+            bounds[base + c * 2 + 1] = Math.max(bounds[base + c * 2 + 1], sample.data[offset + c]);
+          }
+        }
+      }
+      if ((x + 1) % 32 === 0) await yieldIfNeeded();
+    }
+    return { pixels, bounds };
+  };
+  const output = new Uint8ClampedArray(width * height * 4);
+  try {
+    for (let y = 0; y < height; y++) {
+      const taps = await axis(crop.y, crop.height, height, y, source.height);
+      const first = Math.max(0, taps.first);
+      const last = Math.min(source.height - 1, taps.last);
+      for (const key of rows.keys()) if (key < first) rows.delete(key);
+      for (let row = first; row <= last; row++) {
+        if (!rows.has(row)) rows.set(row, await horizontalRow(row));
+      }
+      for (let x = 0; x < width; x++) {
+        const sums = [0, 0, 0, 0];
+        for (let i = taps.first; i <= taps.last; i++) {
+          const row = rows.get(Math.max(0, Math.min(source.height - 1, i)))!;
+          const weight = taps.weights[i - taps.first];
+          for (let c = 0; c < 4; c++) sums[c] += row.pixels[x * 4 + c] * weight;
+        }
+        const alpha = Math.max(0, Math.min(1, sums[3]));
+        const offset = (y * width + x) * 4;
+        output[offset + 3] = Math.round(alpha * 255);
+        for (let c = 0; c < 3; c++) {
+          output[offset + c] = output[offset + 3] === 0 ? 0
+            : Math.round(Math.max(0, Math.min(255 * alpha, sums[c])) / alpha);
+        }
+        // Audited anti-ringing: local source pixel footprint, not the wider
+        // negative-lobe kernel support and not a global 0..255 clamp.
+        for (let c = 0; c < 4; c++) {
+          let min = 255, max = 0;
+          for (let i = taps.footprintFirst; i <= taps.footprintLast; i++) {
+            const bounds = rows.get(i)!.bounds;
+            min = Math.min(min, bounds[x * 8 + c * 2]);
+            max = Math.max(max, bounds[x * 8 + c * 2 + 1]);
+          }
+          output[offset + c] = Math.max(min, Math.min(max, output[offset + c]));
+        }
+        if (output[offset + 3] === 0) output.fill(0, offset, offset + 3);
+        if ((x + 1) % 128 === 0) await yieldIfNeeded();
+      }
+      await yieldIfNeeded();
+    }
+    return new ImageData(output, width, height);
+  } finally {
+    rows.clear(); tiles.clear(); horizontalAxes.clear();
+    canvas.width = 0; canvas.height = 0;
+  }
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -407,7 +535,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) 
         resolve(blob);
       },
       type,
-      quality / 100,
+      quality === undefined ? undefined : quality / 100,
     );
   });
 }
@@ -416,24 +544,47 @@ async function encodeAvif(canvas: HTMLCanvasElement, quality: number) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Не удалось прочитать пиксели изображения.");
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const avif = await import("@jsquash/avif/encode");
-  const buffer = await avif.default(imageData, {
-    quality,
-    speed: 7,
-    subsample: 1,
-    tune: 2,
-  });
+  const { encodeAvifInWorker } = await import("./avif-worker-client");
+  const buffer = await encodeAvifInWorker(imageData, quality);
   return new Blob([buffer], { type: MIME.avif });
 }
 
 async function encodeCanvas(
   canvas: HTMLCanvasElement,
   format: OutputFormat,
-  quality: number,
+  quality: number | null,
 ) {
+  if (format === "png") {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Не удалось прочитать пиксели изображения.");
+    // Only the current output's pixels live here, until encoding completes.
+    return encodePng(context.getImageData(0, 0, canvas.width, canvas.height));
+  }
+  if (quality === null) throw new Error("Не указано качество кодирования.");
   if (format === "avif") return encodeAvif(canvas, quality);
-  if (format === "png") return canvasToBlob(canvas, MIME.png, 100);
   return canvasToBlob(canvas, MIME[format], quality);
+}
+
+async function encodePng(data: ArrayBuffer | ImageData) {
+  const { default: optimise } = await import("@jsquash/oxipng/optimise");
+  const buffer = await optimise(data, {
+    level: 2,
+    optimiseAlpha: false,
+    interlace: false,
+  });
+  return new Blob([buffer], { type: MIME.png });
+}
+
+async function hasOriginalPngDimensions(file: File, width: number, height: number) {
+  const header = await file.slice(0, 24).arrayBuffer();
+  const signature = new Uint8Array(header);
+  if (signature.length < 24 ||
+    ![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => signature[index] === byte)) {
+    return false;
+  }
+  const view = new DataView(header);
+  return view.getUint32(12) === 0x49484452 && // IHDR
+    view.getUint32(16) === width && view.getUint32(20) === height;
 }
 
 function comparisonImageData(
@@ -559,20 +710,31 @@ async function measureSimilarity(reference: HTMLCanvasElement, candidate: Blob) 
 async function encodeVariant(
   canvas: HTMLCanvasElement,
   format: OutputFormat,
-  quality: number,
-  baseName: string,
-  tier: QualityTier = "recommended",
+  quality: number | null,
+  originalPng?: File,
+  pngPixels?: ImageData,
 ) {
-  const blob = await encodeCanvas(canvas, format, quality);
-  let similarity: number | null = null;
-  let similarityMethod: EncodedVariant["similarityMethod"] = "unavailable";
-  try {
-    const measurement = await measureSimilarity(canvas, blob);
-    similarity = measurement.score;
-    similarityMethod = measurement.method;
-  } catch {
-    // Encoding succeeded. Keep the valid file even if this browser cannot
-    // decode it a second time for automatic comparison.
+  const unchangedPng = format === "png" ? originalPng : undefined;
+  const encodedBlob = unchangedPng
+    ? await encodePng(await unchangedPng.arrayBuffer())
+    : format === "png" && pngPixels ? await encodePng(pngPixels)
+      : await encodeCanvas(canvas, format, quality);
+  const blob = unchangedPng && unchangedPng.size <= encodedBlob.size
+    ? unchangedPng
+    : encodedBlob;
+  // The unchanged PNG path is lossless and never rasterizes its output through
+  // Canvas, including for similarity measurement (which can round RGB).
+  let similarity: number | null = unchangedPng ? 1 : null;
+  let similarityMethod: EncodedVariant["similarityMethod"] = unchangedPng ? "pixel" : "unavailable";
+  if (!unchangedPng) {
+    try {
+      const measurement = await measureSimilarity(canvas, blob);
+      similarity = measurement.score;
+      similarityMethod = measurement.method;
+    } catch {
+      // Encoding succeeded. Keep the valid file even if this browser cannot
+      // decode it a second time to measure similarity.
+    }
   }
   return {
     format,
@@ -581,106 +743,61 @@ async function encodeVariant(
     blob,
     size: blob.size,
     quality,
-    tier,
     similarity,
     similarityMethod,
-    fileName: `${baseName}-${canvas.width}${
-      tier === "recommended" ? "" : tier === "lighter" ? "-light" : "-detail"
-    }.${EXTENSION[format]}`,
+    fileName: createVariantFileName(canvas.width, canvas.height, format, format === "png" ? null : quality),
   } satisfies EncodedVariant;
 }
 
-async function chooseQuality(
-  canvas: HTMLCanvasElement,
-  format: LossyOutputFormat,
-  baseName: string,
-  mode: OptimizationMode = "photo",
-) {
-  const config = mode === "screenshot" ? SCREENSHOT_CONFIG : OPTIMIZE_CONFIG;
-  const range = config.search[format];
-  let low = range.min;
-  let high = range.max;
-  let bestQuality: number | null = null;
-  let attempts = 0;
+export const DEFAULT_ENCODER_QUALITY = 80;
 
-  while (low <= high && attempts < 7) {
-    const quality = Math.round((low + high) / 2);
-    const candidate = await encodeVariant(
-      canvas,
-      format,
-      quality,
-      baseName,
-    );
-    attempts += 1;
-
-    if (candidate.similarity === null) return range.fallback;
-    if (candidate.similarity >= config.threshold) {
-      bestQuality = quality;
-      high = quality - 1;
-    } else {
-      low = quality + 1;
-    }
-  }
-
-  return bestQuality ?? range.max;
+export function parseCustomQuality(value: string) {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const quality = Number(trimmed);
+  return Number.isInteger(quality) && quality >= 1 && quality <= 100 ? quality : null;
 }
 
-export function qualityTiers(
-  format: OutputFormat,
-  recommended: number,
-  mode: OptimizationMode = "photo",
-) {
-  if (format === "png") {
-    return [{ tier: "recommended" as const, quality: 100 }];
-  }
-  const range = mode === "screenshot"
-    ? format === "webp"
-      ? SCREENSHOT_WEBP_QUALITY_RANGE
-      : SCREENSHOT_AVIF_QUALITY_RANGE
-    : format === "webp"
-      ? WEBP_QUALITY_RANGE
-      : AVIF_QUALITY_RANGE;
-  return [
-    {
-      tier: "lighter" as const,
-      quality: range.lighter,
-    },
-    {
-      tier: "recommended" as const,
-      quality: Math.min(
-        range.automaticMax,
-        Math.max(range.automaticMin, recommended),
-      ),
-    },
-    {
-      tier: "detail" as const,
-      quality: range.detail,
-    },
-  ];
+export function resolveEncoderQuality(tier: QualityTier, customValue: string) {
+  if (tier === "q65") return 65;
+  if (tier === "q80") return 80;
+  if (tier === "q85") return 85;
+  const quality = parseCustomQuality(customValue);
+  if (quality === null) throw new Error("Введите целое число от 1 до 100");
+  return quality;
 }
 
-function selectRecommended(variants: EncodedVariant[], threshold: number) {
-  const automatic = variants.filter(
-    (variant) => variant.tier === "recommended",
-  );
-  const passed = automatic.filter(
-    (variant) =>
-      variant.similarity !== null &&
-      variant.similarity >= threshold - 0.002,
-  );
-  const measured = automatic.filter((variant) => variant.similarity !== null);
-  const pool =
-    passed.length > 0
-      ? passed
-      : measured.length > 0
-        ? measured
-        : automatic.length > 0
-          ? automatic
-          : variants;
-  return [...pool].sort((a, b) => {
-    if (a.size !== b.size) return a.size - b.size;
-    return (b.similarity ?? -1) - (a.similarity ?? -1);
-  })[0];
+export function outputSelectionKey(width: number, height: number, variant: EncodedVariant) {
+  return `${width}x${height}:${variant.format}:${variant.quality ?? "lossless"}`;
+}
+
+export function defaultOutputSelection(result: OptimizationResult, width = result.results[0]?.width) {
+  const output = result.results.find((item) => item.width === width);
+  const variant = output?.variants.find((item) => item.format === "avif") ?? output?.variants[0];
+  return output && variant ? [outputSelectionKey(output.width, output.height, variant)] : [];
+}
+
+export function toggleOutputSelection(keys: string[], key: string) {
+  return keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key];
+}
+
+export function selectedResultOutputs(result: OptimizationResult | null, keys: string[]) {
+  return result?.results.flatMap((output) => output.variants
+    .filter((variant) => keys.includes(outputSelectionKey(output.width, output.height, variant)))
+    .map((variant) => ({ width: output.width, height: output.height, variant }))) ?? [];
+}
+
+export function outputDownloadLabel(outputs: ReturnType<typeof selectedResultOutputs>) {
+  if (outputs.length > 1) return "СКАЧАТЬ ВСЕ";
+  const output = outputs[0];
+  return output
+    ? `СКАЧАТЬ ${output.width}×${output.height} ${output.variant.format.toUpperCase()}`
+    : "СКАЧАТЬ";
+}
+
+async function createSourceBitmap(file: File) {
+  if (isHeicFile(file)) return decodeHeicBitmap(file);
+  return createImageBitmap(file, { imageOrientation: "from-image" });
 }
 
 export async function optimizeImage(options: {
@@ -688,152 +805,92 @@ export async function optimizeImage(options: {
   profile: ImageProfile;
   crop: CropSettings;
   mode?: OptimizationMode;
+  quality?: number;
+  prepared?: PreparedPng | null;
+  onPrepared?: (prepared: PreparedPng) => void;
   onProgress?: (percent: number, message: string) => void;
 }) {
-  const { file, profile, crop, mode = "photo", onProgress } = options;
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const { file, profile, crop, mode = "photo", quality = DEFAULT_ENCODER_QUALITY, onProgress } = options;
+  if (mode === "transparent-png") {
+    const prepared = await prepareTransparentPng(options);
+    options.onPrepared?.(prepared);
+    const results: WidthResult[] = [];
+    for (const output of prepared.outputs) {
+      let blob: Blob;
+      try { blob = await encodePng(await output.blob.arrayBuffer()); }
+      catch { throw new Error("Не удалось оптимизировать PNG. Уменьшенный PNG остаётся доступным для скачивания."); }
+      results.push({ width: output.width, height: output.height, variants: [{
+        format: "png", mime: "image/png", extension: "png", blob, size: blob.size,
+        quality: null, similarity: null, similarityMethod: "unavailable", fileName: output.fileName,
+      }] });
+    }
+    onProgress?.(100, "PNG готов");
+    return {
+      sourceName: file.name, originalWidth: prepared.originalWidth, originalHeight: prepared.originalHeight,
+      originalSize: file.size, profile, crop, mode, results, warnings: [],
+    } satisfies OptimizationResult;
+  }
+  if (!Number.isInteger(quality) || quality < 1 || quality > 100) {
+    throw new Error("Введите целое качество от 1 до 100.");
+  }
+  const bitmap = await createSourceBitmap(file);
   const warnings: string[] = [];
 
   try {
     if (bitmap.width * bitmap.height > 50_000_000) {
-      throw new Error(
-        "Изображение больше 50 мегапикселей. Уменьшите исходник и попробуйте снова.",
-      );
+      throw new Error("Изображение больше 50 мегапикселей. Уменьшите исходник и попробуйте снова.");
     }
 
     const cropRect = calculateCropRect(bitmap.width, bitmap.height, crop);
     const croppedWidth = Math.max(1, Math.round(cropRect.width));
     const croppedHeight = Math.max(1, Math.round(cropRect.height));
-    const widths = buildTargetWidths(croppedWidth, profile);
-    const baseName = safeBaseName(file.name);
-    const largestWidth = widths.at(-1) ?? bitmap.width;
-    const largestCanvas = createResizedCanvas(
-      bitmap,
-      cropRect,
-      largestWidth,
-    );
-    const threshold =
-      mode === "screenshot" ? SCREENSHOT_CONFIG.threshold : OPTIMIZE_CONFIG.threshold;
-    const formats: OutputFormat[] =
-      mode === "screenshot" ? ["png", "webp"] : ["avif", "webp"];
-    const qualities = new Map<OutputFormat, number>();
-    const encodingErrors: string[] = [];
+    const widths = buildTargetWidths(cropRect.width, profile);
+    if (!widths.length) throw new Error("Выбранные размеры недоступны без увеличения кадра.");
+    const formats: OutputFormat[] = mode === "photo"
+      ? ["avif", "webp"]
+      : ["avif", "webp", "png"];
 
     if (croppedWidth < Math.max(...profile.widths)) {
-      warnings.push(
-        `После кадрирования доступно ${croppedWidth}px по ширине. Сервис не стал искусственно увеличивать изображение до ${Math.max(...profile.widths)}px.`,
-      );
-    }
-
-    onProgress?.(5, "Подбираем качество для современных форматов…");
-    for (let index = 0; index < formats.length; index += 1) {
-      const format = formats[index];
-      try {
-        qualities.set(
-          format,
-          format === "png"
-            ? 100
-            : await chooseQuality(largestCanvas, format, baseName, mode),
-        );
-      } catch (error) {
-        const reason =
-          error instanceof Error ? error.message : "ошибка кодирования";
-        encodingErrors.push(`${format.toUpperCase()}: ${reason}`);
-        if (format === "avif") {
-          warnings.push(
-            "AVIF-кодировщик не запустился; комплект собран без AVIF.",
-          );
-        } else {
-          warnings.push(
-            `${format.toUpperCase()} пропущен: ${reason}`,
-          );
-        }
-      }
-      onProgress?.(
-        10 + Math.round(((index + 1) / formats.length) * 20),
-        mode === "screenshot"
-          ? `Проверяем чёткость ${format.toUpperCase()}…`
-          : `Проверяем ${format.toUpperCase()}…`,
-      );
-    }
-
-    const availableFormats = formats.filter((format) => qualities.has(format));
-    if (availableFormats.length === 0) {
-      throw new Error(
-        `Не удалось создать выходные файлы. ${encodingErrors.join(" · ")}`,
-      );
+      warnings.push(`После кадрирования доступно ${croppedWidth}px по ширине. Изображение не будет увеличено.`);
     }
 
     const results: WidthResult[] = [];
     for (let widthIndex = 0; widthIndex < widths.length; widthIndex += 1) {
       const width = widths[widthIndex];
-      const canvas = createResizedCanvas(
-        bitmap,
-        cropRect,
-        width,
-      );
+      const canvas = createResizedCanvas(bitmap, cropRect, width);
       const variants: EncodedVariant[] = [];
+      const unchangedPng = cropRect.x === 0 && cropRect.y === 0 &&
+        cropRect.width === bitmap.width && cropRect.height === bitmap.height &&
+        canvas.width === bitmap.width && canvas.height === bitmap.height &&
+        await hasOriginalPngDimensions(file, bitmap.width, bitmap.height);
 
-      for (const format of availableFormats) {
-        const recommendedQuality = qualities.get(format);
-        if (recommendedQuality === undefined) continue;
-        for (const qualityOption of qualityTiers(format, recommendedQuality, mode)) {
+      for (const format of formats) {
           try {
-            variants.push(
-              await encodeVariant(
-                canvas,
-                format,
-                qualityOption.quality,
-                baseName,
-                qualityOption.tier,
-              ),
-            );
+            variants.push(await encodeVariant(
+              canvas,
+              format,
+              format === "png" ? null : quality,
+              format === "png" && unchangedPng ? file : undefined,
+              format === "png" && mode === "screenshot" &&
+                canvas.width <= cropRect.width && canvas.height <= cropRect.height &&
+                (canvas.width < cropRect.width || canvas.height < cropRect.height)
+                ? await resizeGraphicsPng(bitmap, cropRect, width) : undefined,
+            ));
           } catch (error) {
-            warnings.push(
-              `${format.toUpperCase()} ${width}px Q${qualityOption.quality} пропущен: ${
-                error instanceof Error ? error.message : "ошибка"
-              }`,
-            );
+            warnings.push(`${format.toUpperCase()} ${width}px пропущен: ${error instanceof Error ? error.message : "ошибка"}`);
           }
-        }
       }
 
-      if (variants.length === 0) {
-        throw new Error(`Не удалось подготовить вариант шириной ${width}px.`);
+      if (!variants.length) {
+        throw new Error(`Не удалось подготовить варианты шириной ${width}px.`);
       }
-
-      const recommended = selectRecommended(variants, threshold);
-      if (
-        recommended.similarity !== null &&
-        recommended.similarity < threshold - 0.002
-      ) {
-        warnings.push(
-          `Для ширины ${width}px заданный порог не достигнут; выбран самый близкий по качеству вариант.`,
-        );
-      }
-
-      results.push({
-        width: canvas.width,
-        height: canvas.height,
-        variants,
-        recommended,
-      });
-
-      onProgress?.(
-        30 + Math.round(((widthIndex + 1) / widths.length) * 68),
-        `Готовим ${width}px для сайта…`,
-      );
+      results.push({ width: canvas.width, height: canvas.height, variants });
+      onProgress?.(10 + Math.round(((widthIndex + 1) / widths.length) * 88), `Готовим ${width}px для сайта…`);
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     }
 
-    if (
-      results.some((widthResult) =>
-        widthResult.variants.some((variant) => variant.similarity === null),
-      )
-    ) {
-      warnings.push(
-        "Часть файлов создана без автоматической проверки сходства. Сравните их ползунком перед публикацией.",
-      );
+    if (results.some((widthResult) => widthResult.variants.some((variant) => variant.similarity === null))) {
+      warnings.push("Для части файлов метрика сходства недоступна.");
     }
 
     onProgress?.(100, "Комплект готов");
@@ -844,7 +901,6 @@ export async function optimizeImage(options: {
       originalSize: file.size,
       profile,
       crop,
-      threshold,
       mode,
       results,
       warnings: [...new Set(warnings)],
@@ -852,122 +908,4 @@ export async function optimizeImage(options: {
   } finally {
     bitmap.close();
   }
-}
-
-function selectedTier(
-  selection: QualitySelection | undefined,
-  format: OutputFormat,
-) {
-  return selection?.[format] ?? "recommended";
-}
-
-function variantsByFormat(
-  result: OptimizationResult,
-  format: OutputFormat,
-  selection?: QualitySelection,
-) {
-  const tier = selectedTier(selection, format);
-  return result.results
-    .map((widthResult) =>
-      widthResult.variants.find(
-        (variant) => variant.format === format && variant.tier === tier,
-      ) ??
-      widthResult.variants.find(
-        (variant) =>
-          variant.format === format && variant.tier === "recommended",
-      ),
-    )
-    .filter((variant): variant is EncodedVariant => Boolean(variant));
-}
-
-export function createPictureMarkup(
-  result: OptimizationResult,
-  selection?: QualitySelection,
-) {
-  const avif = variantsByFormat(result, "avif", selection);
-  const webp = variantsByFormat(result, "webp", selection);
-  const png = variantsByFormat(result, "png", selection);
-  const fallback = png.at(-1) ?? webp.at(-1) ?? avif.at(-1);
-  if (!fallback) return "";
-
-  const sourceLine = (format: OutputFormat, variants: EncodedVariant[]) =>
-    variants.length
-      ? `  <source type="${MIME[format]}" srcset="${variants
-          .map((variant) => `${variant.fileName} ${result.results.find((item) => item.variants.includes(variant))?.width ?? ""}w`)
-          .join(", ")}" sizes="${result.profile.sizes}">`
-      : null;
-
-  const sources = [
-    sourceLine("avif", avif),
-    sourceLine("webp", webp),
-  ].filter((line): line is string => Boolean(line));
-
-  return [
-    "<picture>",
-    ...sources,
-    `  <img src="${fallback.fileName}" width="${result.results.at(-1)?.width}" height="${result.results.at(-1)?.height}" sizes="${result.profile.sizes}" alt="" loading="lazy" decoding="async">`,
-    "</picture>",
-  ].join("\n");
-}
-
-export function createManifest(
-  result: OptimizationResult,
-  selection?: QualitySelection,
-) {
-  return JSON.stringify(
-    {
-      source: result.sourceName,
-      original: {
-        width: result.originalWidth,
-        height: result.originalHeight,
-        bytes: result.originalSize,
-      },
-      profile: result.profile.id,
-      mode: result.mode ?? "photo",
-      sizes: result.profile.sizes,
-      qualityTarget: result.threshold,
-      selectedQuality: {
-        avif: selectedTier(selection, "avif"),
-        webp: selectedTier(selection, "webp"),
-      },
-      crop: {
-        aspectRatio: result.crop.aspectRatio,
-        positionX: result.crop.positionX,
-        positionY: result.crop.positionY,
-      },
-      outputs: result.results.map((widthResult) => ({
-        width: widthResult.width,
-        height: widthResult.height,
-        recommendedFormat: widthResult.recommended.format,
-        variants: (["avif", "webp", "png"] as OutputFormat[])
-          .flatMap((format) => {
-            const variant =
-              widthResult.variants.find(
-                (item) =>
-                  item.format === format &&
-                  item.tier === selectedTier(selection, format),
-              ) ??
-              widthResult.variants.find(
-                (item) =>
-                  item.format === format && item.tier === "recommended",
-              );
-            return variant ? [variant] : [];
-          })
-          .map((variant) => ({
-            file: variant.fileName,
-            format: variant.format,
-            tier: variant.tier,
-            bytes: variant.size,
-            encoderQuality: variant.quality,
-            similarity:
-              variant.similarity === null
-                ? null
-                : Number(variant.similarity.toFixed(5)),
-            similarityMethod: variant.similarityMethod,
-          })),
-      })),
-    },
-    null,
-    2,
-  );
 }

@@ -12,9 +12,12 @@
     "lint": "eslint . --ignore-pattern .next --ignore-pattern out"
   },
   "dependencies": {
+    "@discourse/heic": "^1.0.0",
     "@jsquash/avif": "^2.1.1",
+    "@jsquash/oxipng": "2.3.0",
     "heic2any": "^0.0.4",
     "imagetracerjs": "^1.2.6",
+    "motion": "^13.2.0",
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6",
