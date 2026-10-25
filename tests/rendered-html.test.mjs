@@ -53,6 +53,24 @@ test("current Next production HTML contains the approved hero, navigation and pr
   assert.match(html, /JPEG поддерживается только на входе/);
   assert.match(html, /Для фотографий создаются AVIF и WebP/);
   assert.match(html, /WebApplication/);
+  assert.match(html, /<img[^>]*alt="Tinymods"[^>]*src="\/brand\/tinymods-logo\.svg"/);
+  for (const route of ["index", "privacy", "html-content-editor"]) {
+    const page = await readFile(new URL(`../.next/server/app/${route}.html`, import.meta.url), "utf8");
+    assert.match(page, /rel="icon"[^>]*href="\/favicon\.svg\?v=tinymods-v1"/);
+    assert.match(page, /rel="icon"[^>]*href="\/favicon\.ico\?v=tinymods-v1"/);
+    assert.doesNotMatch(page, /rel="apple-touch-icon"/);
+  }
+  const privacy = await readFile(new URL("../.next/server/app/privacy.html", import.meta.url), "utf8");
+  assert.match(privacy, /class="legal-page" data-ui-theme="editor"/);
+  const header = privacy.match(/<header class="legal-header">([\s\S]*?)<\/header>/)?.[1];
+  assert.ok(header);
+  assert.match(header, /aria-label="Сервисы Tinymods"/);
+  assert.doesNotMatch(header, /aria-current|brand-mark|Вернуться в оптимизатор/);
+  assert.match(privacy, /<h1>Политика обработки персональных данных<\/h1>/);
+  assert.match(privacy, /Редакция от 21 октября 2026 года/);
+  assert.match(privacy, /Перейти в оптимизатор/);
+  assert.match(privacy, /Настройки cookie/);
+  assert.match(privacy, /href="https:\/\/tinymods\.ru\/privacy\/?"/);
   assert.match(html, /FAQPage/);
   assert.doesNotMatch(html, /Retina|сборка ZIP|локальный ZIP|до восьми|для скриншотов — PNG/);
 });

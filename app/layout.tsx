@@ -68,9 +68,11 @@ export const metadata: Metadata = {
     images: ["/og.png"],
   },
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-    apple: "/favicon.svg",
+    icon: [
+      { url: "/favicon.ico?v=tinymods-v1", sizes: "16x16 32x32 48x48 64x64", type: "image/x-icon" },
+      { url: "/favicon.svg?v=tinymods-v1", sizes: "any", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.ico?v=tinymods-v1",
   },
   manifest: "/manifest.webmanifest",
 };

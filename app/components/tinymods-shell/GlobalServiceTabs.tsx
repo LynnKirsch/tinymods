@@ -7,6 +7,7 @@ import type { HelpBlock, ServiceHelpContent } from "../../lib/service-help-conte
 import { usePathname } from "next/navigation";
 import {
   getTinymodsServiceByPathname,
+  normalizeTinymodsPathname,
   TINYMODS_SERVICES,
   type TinymodsService,
 } from "../../lib/tinymods-services";
@@ -14,13 +15,16 @@ import styles from "./TinymodsToolsShell.module.css";
 
 type GlobalServiceTabsProps = {
   helpContent?: ServiceHelpContent;
+  selectedServiceId?: TinymodsService["id"];
   onServiceClick?: (event: MouseEvent<HTMLAnchorElement>, service: TinymodsService) => void;
 };
 
-export default function GlobalServiceTabs({ onServiceClick, helpContent }: GlobalServiceTabsProps) {
+export default function GlobalServiceTabs({ onServiceClick, helpContent, selectedServiceId }: GlobalServiceTabsProps) {
   const [helpView, setHelpView] = useState<"instruction" | "faq" | null>(null);
   const pathname = usePathname();
-  const activeService = getTinymodsServiceByPathname(pathname);
+  const currentPathname = normalizeTinymodsPathname(pathname);
+  const activeService = TINYMODS_SERVICES.find(service => service.id === selectedServiceId)
+    ?? getTinymodsServiceByPathname(pathname);
   const content = helpContent?.[activeService.id];
   const theme = activeService.id === "html-content-editor" ? "editor" : "optima";
 
@@ -32,13 +36,16 @@ export default function GlobalServiceTabs({ onServiceClick, helpContent }: Globa
       <div className={styles.tabScroller}>
         {TINYMODS_SERVICES.map((service) => {
           const active = service.id === activeService.id;
+          const current = currentPathname === service.href
+            || (service.href !== "/" && currentPathname.startsWith(`${service.href}/`));
 
           return (
             <Link
               key={service.id}
               className={active ? `${styles.tab} ${styles.activeTab}` : styles.tab}
               href={service.href}
-              aria-current={active ? "page" : undefined}
+              data-ui-theme={service.id === "html-content-editor" ? "editor" : undefined}
+              aria-current={current ? "page" : undefined}
               onClick={(event) => onServiceClick?.(event, service)}
             >
               {active ? <span className={styles.tabAccent} aria-hidden="true" /> : null}

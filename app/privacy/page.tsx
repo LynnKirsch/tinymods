@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import GlobalServiceTabs from "../components/tinymods-shell/GlobalServiceTabs";
 import { CookieConsent, CookieSettingsButton } from "../components/CookieConsent";
 
 const CURRENT_SITE_URL = "https://tinymods.ru";
@@ -28,17 +29,13 @@ const POLICY_DATA = {
 
 export default function PrivacyPage() {
   return (
-    <main className="legal-page">
+    <main className="legal-page" data-ui-theme="editor">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(POLICY_DATA) }}
       />
       <header className="legal-header">
-        <Link className="brand" href="/" aria-label="Вернуться в Optima">
-          <span className="brand-mark" aria-hidden="true">O</span>
-          <span><strong>Оптима</strong><small>Image Optimizer</small></span>
-        </Link>
-        <Link href="/">← Вернуться в оптимизатор</Link>
+        <GlobalServiceTabs selectedServiceId="html-content-editor" />
       </header>
 
       <article className="legal-document">

@@ -1,5 +1,6 @@
 import { IMAGE_OPTIMIZER_FAQ as FAQ_ITEMS } from "../lib/service-help-content";
 import ImageOptimizer from "../components/ImageOptimizer";
+import Image from "next/image";
 import { CookieConsent, CookieSettingsButton } from "../components/CookieConsent";
 
 const SITE_URL = "https://tinymods.ru";
@@ -128,9 +129,8 @@ export default function Home() {
           </a>
         </div>
         <div className="footer-legal">
-          <a className="brand" href="#top" aria-label="Оптима — наверх">
-            <span className="brand-mark" aria-hidden="true">O</span>
-            <span><strong>Оптима</strong><small>Image Optimizer</small></span>
+          <a className="brand" href="#top" aria-label="Tinymods — наверх">
+            <Image src="/brand/tinymods-logo.svg" alt="Tinymods" width={1961} height={385} />
           </a>
           <div className="footer-operator">
             <strong>ИП Кирюшкина Е.В.</strong>

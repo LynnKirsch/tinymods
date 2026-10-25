@@ -90,6 +90,23 @@
   background: var(--ui-accent-soft);
 }
 
+
+/* Editor keeps its blue identity even when another service is selected. */
+.tab:global([data-ui-theme="editor"]) {
+  border-color: var(--ui-accent-border);
+  color: var(--ui-accent-ink);
+}
+
+.tab:global([data-ui-theme="editor"]):hover {
+  border-color: var(--ui-accent-hover);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent-ink);
+}
+
+.activeTab:global([data-ui-theme="editor"]) {
+  background: var(--ui-accent-soft);
+}
+
 .tabAccent {
   width: var(--ui-space-8);
   height: var(--ui-space-8);

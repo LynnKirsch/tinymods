@@ -4421,21 +4421,8 @@ footer {
     --page-gutter: 15px;
   }
 
-  .legal-header {
-    min-height: 82px;
-  }
 
-  .legal-header > .brand {
-    grid-column: 1 / 8;
-  }
 
-  .legal-header > a:last-child {
-    grid-column: 8 / 13;
-
-    font-size: 12px;
-
-    text-align: right;
-  }
 
   .legal-document {
     padding: 54px 0;
@@ -4445,9 +4432,6 @@ footer {
     padding-bottom: 40px;
   }
 
-  .legal-document h1 {
-    font-size: 35px;
-  }
 
   .legal-date {
     font-size: 11px;
@@ -4771,27 +4755,6 @@ padding: 20px 56px 20px 20px;
   margin-right: auto;
   margin-left: auto;
 }
-.legal-header {
-  width: calc(100% - (var(--page-gutter) * 2));
-  max-width: none;
-  min-height: 88px;
-  margin-right: auto;
-  margin-left: auto;
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  align-items: center;
-  column-gap: var(--grid-gap, 14px);
-  border-bottom: 1px solid var(--line);
-}
-.legal-header > .brand { grid-column: 1 / 5; justify-self: start; }
-.legal-header > a:last-child {
-  grid-column: 9 / 13;
-  justify-self: end;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 750;
-  text-underline-offset: 5px;
-}
 .legal-document { padding: clamp(58px, 8vw, 118px) 0; }
 .legal-document > header { max-width: 930px; padding-bottom: 54px; }
 .legal-date {
@@ -4801,14 +4764,6 @@ padding: 20px 56px 20px 20px;
   font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
-}
-.legal-document h1 {
-  margin: 0;
-  font-family: Inter, Manrope, "Segoe UI", Arial, sans-serif;
-  font-size: clamp(40px, 4.25vw, 60px);
-  font-weight: 690;
-  line-height: 1.04;
-  letter-spacing: -.045em;
 }
 .legal-document > header > p:last-child { max-width: 780px; margin: 18px 0 0; color: #59655f; font-size: 17px; line-height: 1.7; }
 .legal-document section {
@@ -4914,10 +4869,8 @@ padding: 20px 56px 20px 20px;
   .cookie-consent-actions { display: grid; grid-template-columns: 1fr; }
   .cookie-consent-actions button { min-height: 50px; }
   .legal-page { --page-gutter: 15px; }
-  .legal-header { min-height: 82px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 12px; }
   .legal-document { padding: 56px 0; }
   .legal-document > header { padding-bottom: 42px; }
-  .legal-document h1 { font-size: 36px; }
   .legal-document > header > p:last-child { font-size: 15px; }
   .legal-document section { padding: 34px 0; grid-template-columns: 1fr; gap: 22px; }
   .legal-document section > :not(h2) { grid-column: 1; }
@@ -4976,14 +4929,9 @@ padding: 20px 56px 20px 20px;
   .cookie-consent { grid-template-columns: 1fr; }
   .cookie-consent-actions { justify-content: flex-end; }
   .legal-page { --page-gutter: 30px; }
-  .legal-document h1 { font-size: 39px; }
   .legal-document section { grid-template-columns: 1fr; gap: 22px; }
   .legal-document section > :not(h2) { grid-column: 1; }
   .legal-footer { align-items: flex-start; flex-direction: column; }
-}
-
-@media (min-width: 640px) and (max-width: 959px) {
-  .legal-document h1 { font-size: 45px; }
 }
 
 @media (min-width: 960px) and (max-width: 1199px) {
@@ -5405,9 +5353,6 @@ padding: 20px 56px 20px 20px;
     --grid-gap: 14px;
   }
 
-  .legal-header {
-    min-height: 84px;
-  }
 
   .legal-document {
     padding: 76px 0;
@@ -5418,9 +5363,6 @@ padding: 20px 56px 20px 20px;
     padding-bottom: 48px;
   }
 
-  .legal-document h1 {
-    font-size: 44px;
-  }
 
   .legal-document > header > p:last-child {
     font-size: 16px;
@@ -5455,10 +5397,6 @@ padding: 20px 56px 20px 20px;
 
 @media (min-width: 1200px) and (max-width: 1919px) {
   .legal-page { --page-gutter: 50px; --grid-gap: 18px; }
-}
-
-@media (min-width: 1200px) and (max-width: 1439px) {
-  .legal-document h1 { font-size: 53px; }
 }
 
 
@@ -5664,12 +5602,8 @@ padding: 20px 56px 20px 20px;
     --grid-gap: 18px;
   }
 
-  .legal-document h1 {
-    font-size: 57px;
-  }
 
   .legal-date,
-  .legal-header > a:last-child,
   .legal-document dt,
   .legal-footer {
     font-size: 14px;
@@ -5932,12 +5866,8 @@ padding: 20px 56px 20px 20px;
     max-width: 1150px;
   }
 
-  .legal-document h1 {
-    font-size: 65px;
-  }
 
   .legal-date,
-  .legal-header > a:last-child,
   .legal-document dt,
   .legal-footer {
     font-size: 17px;
@@ -6231,12 +6161,8 @@ padding: 20px 56px 20px 20px;
     max-width: 1350px;
   }
 
-  .legal-document h1 {
-    font-size: 76px;
-  }
 
   .legal-date,
-  .legal-header > a:last-child,
   .legal-document dt,
   .legal-footer {
     font-size: 20px;
@@ -7073,3 +6999,57 @@ padding: 20px 56px 20px 20px;
 #size-guide-panel .size-guide-note { margin-top: var(--ui-space-16); padding: var(--ui-space-16); border: 1px solid var(--ui-border-soft); border-radius: var(--ui-radius-md); background: var(--ui-surface-2); }
 #size-guide-panel .size-guide-note h3 { margin-bottom: var(--ui-space-8); color: var(--ui-accent-ink); }
 #size-guide-panel .size-guide-note p { margin: 0; font-size: 14px; line-height: var(--ui-leading-body); }
+
+/* Privacy uses the shared Editor palette and service navigation. */
+.legal-header {
+  position: relative;
+  min-height: 48px;
+}
+
+.legal-page .legal-document {
+  padding-top: clamp(72px, 7vw, 112px);
+}
+
+.legal-document h1 {
+  margin: 0;
+  font-family: var(--ui-font-family);
+  font-size: clamp(28px, 2.4vw, 44px);
+  font-weight: var(--ui-weight-heading);
+  line-height: var(--ui-leading-tight);
+  letter-spacing: -.025em;
+}
+
+.legal-page .legal-date {
+  margin-top: var(--ui-space-24);
+  color: var(--ui-text-secondary);
+  font-weight: var(--ui-weight-control);
+}
+
+.legal-page .legal-document > header > p:last-child,
+.legal-page .legal-document p,
+.legal-page .legal-document li,
+.legal-page .legal-document dd,
+.legal-page .legal-document dt,
+.legal-page .legal-footer {
+  color: var(--ui-text-secondary);
+}
+
+.legal-page .legal-document a,
+.legal-page .legal-footer a {
+  color: var(--ui-accent-ink);
+}
+
+.legal-page .legal-document code {
+  background: var(--ui-surface-3);
+}
+
+.footer-legal > .brand img {
+  display: block;
+  width: clamp(160px, 12vw, 220px);
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 479px) {
+  .legal-header { min-height: 43px; }
+}
