@@ -78,6 +78,8 @@ class Page {
     this.context = context; this.target = target; this.session = session; this.analytics = analytics;
     this.errors = []; this.failures = []; this.protocolErrors = []; this.requests = new Map();
     this.external = []; this.workerTargets = []; this.downloads = new Map(); this.closed = false;
+    this.sessions = new Map([[session, { sessionId: session, targetId: target, type: 'page',
+      parentSession: null, attached: true, ready: true }]]);
     this.removeListener = protocol.listen(message => {
       if (message.method === 'Browser.downloadWillBegin' && (!message.params.browserContextId || message.params.browserContextId === this.context)) {
         // Only one page can download at a time; each context is disposed before the next scenario.
@@ -86,17 +88,26 @@ class Page {
       if (message.method === 'Browser.downloadProgress' && this.downloads.has(message.params.guid)) {
         Object.assign(this.downloads.get(message.params.guid), message.params);
       }
-      if (message.sessionId !== this.session) return;
+      const source = this.sessions.get(message.sessionId);
+      if (!source?.attached) return;
       const p = message.params;
-      if (message.method === 'Target.attachedToTarget' && p.targetInfo.type === 'worker') {
-        this.workerTargets.push({ type: p.targetInfo.type, url: safeUrl(p.targetInfo.url) });
+      if (message.method === 'Target.attachedToTarget') {
+        const child = { sessionId: p.sessionId, targetId: p.targetInfo.targetId, type: p.targetInfo.type,
+          parentSession: message.sessionId, attached: true, ready: false };
+        this.sessions.set(p.sessionId, child);
+        if (child.type === 'worker') this.workerTargets.push({ type: child.type, url: safeUrl(p.targetInfo.url) });
+        if (child.type === 'iframe') void this.prepareFrameSession(child);
       }
+      if (message.method === 'Target.detachedFromTarget') this.detachSession(p.sessionId);
+      // Observe Preview errors in its renderer too; existing main-page network interception is unchanged.
+      if (source.type !== 'page' && source.type !== 'iframe') return;
       if (message.method === 'Runtime.exceptionThrown') {
         this.errors.push(brief(p.exceptionDetails.exception?.description ?? p.exceptionDetails.text));
       }
       if (message.method === 'Runtime.consoleAPICalled' && p.type === 'error') {
         this.errors.push(p.args.map(a => brief(a.value ?? a.description)).join(' ').slice(0, 1200));
       }
+      if (message.sessionId !== this.session) return;
       if (message.method === 'Network.requestWillBeSent') this.requests.set(p.requestId, p.request.url);
       if (message.method === 'Network.responseReceived' && p.response.status >= 400 && p.response.url.startsWith(origin)) {
         this.failures.push({ url: safeUrl(p.response.url), status: p.response.status });
@@ -111,6 +122,33 @@ class Page {
     });
   }
   send(method, params = {}) { return protocol.send(method, params, this.session); }
+  detachSession(sessionId) {
+    const entry = this.sessions.get(sessionId);
+    if (entry) { entry.attached = false; entry.ready = false; }
+    for (const child of this.sessions.values()) {
+      if (child.parentSession === sessionId && child.attached) this.detachSession(child.sessionId);
+    }
+  }
+  async prepareFrameSession(entry) {
+    try {
+      for (const method of ['Page.enable', 'Runtime.enable']) {
+        if (!entry.attached || this.closed) return;
+        await protocol.send(method, {}, entry.sessionId);
+      }
+      if (!entry.attached || this.closed) return;
+      await protocol.send('Target.setAutoAttach', {
+        autoAttach: true, waitForDebuggerOnStart: false, flatten: true,
+      }, entry.sessionId);
+      entry.ready = entry.attached;
+    } catch (error) {
+      entry.error = brief(error);
+      if (this.frameRace(error)) this.detachSession(entry.sessionId);
+      else if (!this.closed && entry.attached) this.protocolErrors.push('Preview session: ' + brief(error));
+    }
+  }
+  frameRace(error) {
+    return /No frame with given id|Cannot find frame|Cannot find context|context.*destroyed|Cannot find execution context|No node with given id|Could not find node|Session (?:with given id )?not found|Target closed|target.*closed|Inspected target navigated or closed/i.test(error.message);
+  }
   async intercept(event) {
     const { requestId, request } = event;
     const url = new URL(request.url);
@@ -132,11 +170,11 @@ class Page {
       record.outcome = 'cancelled-before-send';
     }
   }
-  async evaluate(expression, contextId) {
-    const result = await this.send('Runtime.evaluate', {
+  async evaluate(expression, contextId, sessionId = this.session) {
+    const result = await protocol.send('Runtime.evaluate', {
       expression, awaitPromise: true, returnByValue: true, userGesture: true, timeout: 12_000,
       ...(contextId ? { contextId } : {}),
-    });
+    }, sessionId);
     if (result.exceptionDetails) throw new Error(brief(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text));
     return result.result?.value;
   }
@@ -202,23 +240,59 @@ class Page {
         controlCount: controls.length };
     });
   }
+  async previewOwner() {
+    const { root } = await this.send('DOM.getDocument', { depth: 0 });
+    const { nodeIds } = await this.send('DOM.querySelectorAll', {
+      nodeId: root.nodeId, selector: 'iframe[title="Предпросмотр HTML-блоков"]',
+    });
+    assert.ok(nodeIds.length <= 1, 'Exactly one live Preview iframe owner');
+    if (!nodeIds.length) return null;
+    const { node } = await this.send('DOM.describeNode', { nodeId: nodeIds[0] });
+    return { backendNodeId: node.backendNodeId, frameId: node.frameId };
+  }
   async frameHeading() {
+    this.lastPreview = { targets: this.targetDiagnostics(), frames: [] };
     try {
-      const { frameTree } = await this.send('Page.getFrameTree');
-      const frames = [];
-      const visit = node => { frames.push(node.frame); for (const child of node.childFrames ?? []) visit(child); };
-      visit(frameTree);
-      this.lastPreview = { frames: frames.map(f => ({ id: f.id,
-        url: f.url === 'about:srcdoc' ? f.url : safeUrl(f.url) })) };
-      const candidates = frames.filter(f => f.url === 'about:srcdoc');
-      this.lastPreview.srcdocFrames = candidates.length;
-      assert.ok(candidates.length <= 1, 'Preview frame must be unambiguous');
-      const frame = candidates[0];
-      if (!frame) return null;
-      const { executionContextId } = await this.send('Page.createIsolatedWorld', {
-        frameId: frame.id, worldName: 'optima-smoke-read-only',
-      });
-      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })', executionContextId);
+      const owner = await this.previewOwner();
+      this.lastPreview.owner = owner;
+      if (!owner?.frameId) return null;
+      // Page.getFrameTree is session-local. Resolve the owner's frame ID in the renderer
+      // which actually contains it; do not assume targetId == frameId or select by URL.
+      let candidate;
+      for (const entry of this.sessions.values()) {
+        if (!entry.attached || !entry.ready || !['page', 'iframe'].includes(entry.type)) continue;
+        try {
+          const { frameTree } = await protocol.send('Page.getFrameTree', {}, entry.sessionId);
+          const frames = [];
+          const visit = node => { frames.push(node.frame); for (const child of node.childFrames ?? []) visit(child); };
+          visit(frameTree);
+          this.lastPreview.frames.push(...frames.map(frame => ({
+            id: frame.id, sessionId: entry.sessionId, targetType: entry.type,
+          })));
+          if (frames.some(frame => frame.id === owner.frameId)) {
+            // An OOPIF's own root is authoritative if a parent also lists its placeholder.
+            if (!candidate || frameTree.frame.id === owner.frameId) candidate = entry;
+            if (frameTree.frame.id === owner.frameId) break;
+          }
+        } catch (error) {
+          if (!this.frameRace(error)) throw error;
+          this.lastPreview.sessionRace = { sessionId: entry.sessionId, error: brief(error) };
+          if (/Session .*not found|Target closed|target.*closed/i.test(error.message)) this.detachSession(entry.sessionId);
+        }
+      }
+      if (!candidate) return null;
+      this.lastPreview.selectedSessionId = candidate.sessionId;
+      this.lastPreview.selectedTargetType = candidate.type;
+      const { executionContextId } = await protocol.send('Page.createIsolatedWorld', {
+        frameId: owner.frameId, worldName: 'optima-smoke-read-only',
+      }, candidate.sessionId);
+      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })',
+        executionContextId, candidate.sessionId);
+      const current = await this.previewOwner();
+      if (!candidate.attached || current?.backendNodeId !== owner.backendNodeId || current?.frameId !== owner.frameId) {
+        this.lastPreview.state = 'Preview owner replaced during DOM read';
+        return null;
+      }
       this.lastPreview.headingState = preview.heading === undefined ? 'absent' :
         preview.heading === 'Smoke updated heading' ? 'expected' :
         preview.heading === 'Sample card one' ? 'original' : 'different';
@@ -226,14 +300,21 @@ class Page {
       this.lastPreview.readyState = preview.readyState;
       return preview;
     } catch (error) {
-      this.lastPreview = { ...this.lastPreview, error: brief(error) };
-      // React replaces srcDoc after edits; only retry known transient frame/context races.
-      if (/No frame with given id|Cannot find frame|Cannot find context|context.*destroyed/i.test(error.message)) return null;
+      this.lastPreview.error = brief(error);
+      // React recreates the iframe. Retry only known stale node/frame/session/context races.
+      if (this.frameRace(error)) return null;
       throw error;
     }
   }
+  targetDiagnostics() {
+    return Array.from(this.sessions.values(), entry => ({
+      type: entry.type, targetId: entry.targetId, sessionId: entry.sessionId,
+      parentSession: entry.parentSession, attached: entry.attached, ready: entry.ready,
+      ...(entry.error ? { error: entry.error } : {}),
+    }));
+  }
   async diagnostics() {
-    return { focus: await this.focusState(), preview: this.lastPreview ?? null,
+    return { focus: await this.focusState(), targets: this.targetDiagnostics(), preview: this.lastPreview ?? null,
       editor: await this.fn(() => {
         const input = document.querySelector('input[aria-label="Заголовок"]');
         return { headingInputPresent: Boolean(input), headingLength: input?.value.length ?? 0,
