@@ -30,6 +30,7 @@ function renderShellComponent(source, pathname, { reducedMotion = false, onServi
       useRouter: () => ({ push: (...args) => calls.push(["push", ...args]) }),
     },
     "next/link": { __esModule: true, default: "Link" },
+    "next/image": { __esModule: true, default: "Image" },
     "motion/react": {
       AnimatePresence: "AnimatePresence",
       motion: { div: "motion.div" },
@@ -104,7 +105,14 @@ for (const [pathname, theme, activeHref] of [
     assert.equal(nav.type, "nav");
     assert.equal(nav.props["aria-label"], "Сервисы Tinymods");
     assert.equal(nav.props.style, undefined);
-    const links = nav.props.children[0].props.children;
+    const logo = nav.props.children[0];
+    assert.equal(logo.type, "Link");
+    assert.equal(logo.props.href, "/");
+    assert.equal(logo.props["aria-label"], "Tinymods — главная");
+    assert.equal(logo.props.children.props.src, "/brand/tinymods-logo.svg");
+    assert.equal(logo.props.children.props.alt, "");
+    assert.equal(logo.props.children.props.width / logo.props.children.props.height, 1961 / 385);
+    const links = nav.props.children[1].props.children;
     assert.deepEqual(Array.from(links, (link) => link.props.href), ["/", "/html-content-editor"]);
     for (const [index, link] of links.entries()) {
       const active = link.props.href === activeHref;
@@ -187,7 +195,10 @@ test("shell retains responsive gutters, tab scrolling and working area geometry"
     const padding = gutters.filter(([min]) => width >= min).at(-1)?.[1] ?? 15;
     assert.equal(padding, expected, `gutter at ${width}px`);
   }
-  assert.match(shellCss, /\.tabs\s*\{[^}]*position: absolute;[^}]*inset: 0 0 auto;[^}]*padding: 0 15px;/);
+  assert.match(shellCss, /\.tabs\s*\{[^}]*position: relative;[^}]*padding: 0 15px;[^}]*display: grid;[^}]*grid-template-columns: repeat\(12, minmax\(0, 1fr\)\);/);
+  assert.match(shellCss, /\.brandLink\s*\{[^}]*grid-column: 1 \/ 5;[^}]*display: inline-flex;/);
+  assert.match(shellCss, /\.brandLink img\s*\{[^}]*max-width: 100%;[^}]*height: auto;/);
+  assert.doesNotMatch(shellCss.match(/\.brandLink\s*\{([^}]*)\}/)[1], /position:\s*absolute|margin-left|transform/);
   assert.match(shellCss, /\.tabScroller\s*\{[^}]*display: flex;[^}]*overflow-x: auto;[^}]*overflow-y: hidden;/);
   assert.match(shellCss, /\.pageStack\s*\{[^}]*display: grid;[^}]*overflow-x: clip;/);
   assert.match(shellCss, /\.pageLayer\s*\{[^}]*grid-area: 1 \/ 1;[^}]*contain: paint;[^}]*will-change: transform;/);
@@ -228,7 +239,7 @@ test("help buttons open the current service content without navigation or replac
   const helpContent = await loadServiceHelpContent();
   for (const [path, theme] of [["/", "optima"], ["/html-content-editor", "editor"]]) {
     const { tree: nav, calls } = renderShellComponent(tabsSource, path, { helpContent, helpView: "faq" });
-    const [, actions, drawer] = nav.props.children;
+    const [, , actions, drawer] = nav.props.children;
     assert.equal(actions.props.children.length, 2);
     actions.props.children[0].props.onClick();
     actions.props.children[1].props.onClick();
@@ -245,11 +256,11 @@ test("help buttons open the current service content without navigation or replac
 
 test("Privacy selects the blue Editor tab without claiming a different URL is current", () => {
   const { tree } = renderShellComponent(tabsSource, "/privacy/", { selectedServiceId: "html-content-editor" });
-  const links = tree.props.children[0].props.children;
+  const links = tree.props.children[1].props.children;
   assert.equal(links[0].props.className, "tab");
   assert.equal(links[1].props.className, "tab activeTab");
   assert.equal(links[1].props["data-ui-theme"], "editor");
   assert.equal(links[0].props["aria-current"], undefined);
   assert.equal(links[1].props["aria-current"], undefined);
-  assert.equal(tree.props.children[1], null);
+  assert.equal(tree.props.children[2], null);
 });

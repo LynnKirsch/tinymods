@@ -582,7 +582,7 @@ async function shellScenario(page) {
   await page.wait(() => location.pathname.replace(/\/$/, '') === '/html-content-editor' &&
     Boolean(document.querySelector('#block-1-fragment-1')), 'client navigation to Editor');
   await checkHelp(page);
-  await page.click('nav[aria-label="Сервисы Tinymods"] a[href="/"]');
+  await page.click('nav[aria-label="Сервисы Tinymods"] a[href="/"]:not([aria-label])');
   await page.wait(() => location.pathname === '/' && Boolean(document.querySelector('.dropzone')), 'client navigation back to Optimizer');
   await checkHelp(page);
   page.healthy();

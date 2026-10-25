@@ -78,9 +78,6 @@ export default function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
       />
-      {/* Reserve the existing header geometry for the shared service/help navigation. */}
-      <div className="release-header" aria-hidden="true" />
-
       <section className="release-hero" aria-labelledby="release-title">
         <h1 id="release-title">
           <span>Оптимизируйте</span>{" "}

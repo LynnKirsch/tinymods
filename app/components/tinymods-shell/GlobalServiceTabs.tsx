@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState, type MouseEvent } from "react";
 import ServiceHelpDrawer from "./ServiceHelpDrawer";
 import type { HelpBlock, ServiceHelpContent } from "../../lib/service-help-content";
@@ -33,6 +34,9 @@ export default function GlobalServiceTabs({ onServiceClick, helpContent, selecte
       className={styles.tabs}
       aria-label="Сервисы Tinymods"
     >
+      <Link className={styles.brandLink} href="/" aria-label="Tinymods — главная">
+        <Image src="/brand/tinymods-logo.svg" alt="" width={1961} height={385} />
+      </Link>
       <div className={styles.tabScroller}>
         {TINYMODS_SERVICES.map((service) => {
           const active = service.id === activeService.id;
