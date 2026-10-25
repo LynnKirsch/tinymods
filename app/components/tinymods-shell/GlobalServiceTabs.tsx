@@ -35,7 +35,7 @@ export default function GlobalServiceTabs({ onServiceClick, helpContent, selecte
       aria-label="Сервисы Tinymods"
     >
       <Link className={styles.brandLink} href="/" aria-label="Tinymods — главная">
-        <Image src="/brand/tinymods-logo.svg" alt="" width={1961} height={385} />
+        <Image src="/brand/tinymods-logo.svg?v=da2261dccb4d" alt="" width={1961} height={385} />
       </Link>
       <div className={styles.tabScroller}>
         {TINYMODS_SERVICES.map((service) => {

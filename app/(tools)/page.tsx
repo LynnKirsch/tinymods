@@ -127,7 +127,7 @@ export default function Home() {
         </div>
         <div className="footer-legal">
           <a className="brand" href="#top" aria-label="Tinymods — наверх">
-            <Image src="/brand/tinymods-logo.svg" alt="Tinymods" width={1961} height={385} />
+            <Image src="/brand/tinymods-logo.svg?v=da2261dccb4d" alt="Tinymods" width={1961} height={385} />
           </a>
           <div className="footer-operator">
             <strong>ИП Кирюшкина Е.В.</strong>

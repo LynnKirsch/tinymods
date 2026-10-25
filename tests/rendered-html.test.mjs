@@ -53,7 +53,7 @@ test("current Next production HTML contains the approved hero, navigation and pr
   assert.match(html, /JPEG поддерживается только на входе/);
   assert.match(html, /Для фотографий создаются AVIF и WebP/);
   assert.match(html, /WebApplication/);
-  assert.match(html, /<img[^>]*alt="Tinymods"[^>]*src="\/brand\/tinymods-logo\.svg"/);
+  assert.match(html, /<img[^>]*alt="Tinymods"[^>]*src="\/brand\/tinymods-logo\.svg\?v=da2261dccb4d"/);
   for (const route of ["index", "privacy", "html-content-editor"]) {
     const page = await readFile(new URL(`../.next/server/app/${route}.html`, import.meta.url), "utf8");
     assert.match(page, /rel="icon"[^>]*href="\/favicon\.svg\?v=tinymods-v1"/);

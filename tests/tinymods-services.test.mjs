@@ -109,7 +109,7 @@ for (const [pathname, theme, activeHref] of [
     assert.equal(logo.type, "Link");
     assert.equal(logo.props.href, "/");
     assert.equal(logo.props["aria-label"], "Tinymods — главная");
-    assert.equal(logo.props.children.props.src, "/brand/tinymods-logo.svg");
+    assert.equal(logo.props.children.props.src, "/brand/tinymods-logo.svg?v=da2261dccb4d");
     assert.equal(logo.props.children.props.alt, "");
     assert.equal(logo.props.children.props.width / logo.props.children.props.height, 1961 / 385);
     const links = nav.props.children[1].props.children;
