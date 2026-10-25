@@ -163,8 +163,12 @@ class Page {
     return this.clickExpression('Array.from(' + root + '.querySelectorAll("button")).find(el => el.textContent.trim() === ' + JSON.stringify(text) + ' && el.getClientRects().length)');
   }
   async key(key, modifiers = 0) {
-    await this.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, modifiers });
-    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, modifiers });
+    const definition = { Tab: { code: 'Tab', windowsVirtualKeyCode: 9 },
+      Escape: { code: 'Escape', windowsVirtualKeyCode: 27 },
+      a: { code: 'KeyA', windowsVirtualKeyCode: 65 } }[key];
+    assert.ok(definition, 'Known CDP keyboard key');
+    await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, ...definition, modifiers });
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key, ...definition, modifiers });
   }
   async fill(selector, value) {
     await this.fn(selector => {
@@ -172,10 +176,31 @@ class Page {
       if (!el || el.readOnly || el.disabled) throw Error('Editable input not found');
       el.focus();
     }, selector);
-    await this.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2 });
-    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2 });
+    // Chromium resolves Ctrl+A through virtual key 65; key/code alone are insufficient.
+    await this.key('a', 2);
+    assert.equal(await this.fn(selector => {
+      const el = document.querySelector(selector);
+      return el.selectionStart === null || (el.selectionStart === 0 && el.selectionEnd === el.value.length);
+    }, selector), true, 'Ctrl+A selected the complete editable value');
     await this.send('Input.insertText', { text: value });
+    assert.equal(await this.fn((selector, value) => document.querySelector(selector)?.value === value, selector, value),
+      true, 'Input.insertText replaced the complete value');
     await this.key('Tab');
+    assert.equal(await this.fn((selector, value) => document.querySelector(selector)?.value === value, selector, value),
+      true, 'Controlled input retains replacement after blur');
+  }
+  async focusState() {
+    return this.fn(() => {
+      const el = document.activeElement;
+      const dialog = document.querySelector('#service-help-panel');
+      const controls = dialog ? Array.from(dialog.querySelectorAll(
+        'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]',
+      )).filter(item => item.getClientRects().length > 0) : [];
+      return { tag: el?.tagName, role: el?.getAttribute('role'), ariaLabel: el?.getAttribute('aria-label'),
+        text: el?.matches('button,a,summary') ? el.textContent.trim().slice(0, 80) : '',
+        inside: Boolean(el?.closest('#service-help-panel')), first: el === controls[0], last: el === controls.at(-1),
+        controlCount: controls.length };
+    });
   }
   async frameHeading() {
     try {
@@ -183,17 +208,42 @@ class Page {
       const frames = [];
       const visit = node => { frames.push(node.frame); for (const child of node.childFrames ?? []) visit(child); };
       visit(frameTree);
-      const frame = frames.find(f => f.url === 'about:srcdoc');
+      this.lastPreview = { frames: frames.map(f => ({ id: f.id,
+        url: f.url === 'about:srcdoc' ? f.url : safeUrl(f.url) })) };
+      const candidates = frames.filter(f => f.url === 'about:srcdoc');
+      this.lastPreview.srcdocFrames = candidates.length;
+      assert.ok(candidates.length <= 1, 'Preview frame must be unambiguous');
+      const frame = candidates[0];
       if (!frame) return null;
       const { executionContextId } = await this.send('Page.createIsolatedWorld', {
         frameId: frame.id, worldName: 'optima-smoke-read-only',
       });
-      return await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2 })', executionContextId);
+      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })', executionContextId);
+      this.lastPreview.headingState = preview.heading === undefined ? 'absent' :
+        preview.heading === 'Smoke updated heading' ? 'expected' :
+        preview.heading === 'Sample card one' ? 'original' : 'different';
+      this.lastPreview.headingLength = preview.heading?.length ?? 0;
+      this.lastPreview.readyState = preview.readyState;
+      return preview;
     } catch (error) {
+      this.lastPreview = { ...this.lastPreview, error: brief(error) };
       // React replaces srcDoc after edits; only retry known transient frame/context races.
       if (/No frame with given id|Cannot find frame|Cannot find context|context.*destroyed/i.test(error.message)) return null;
       throw error;
     }
+  }
+  async diagnostics() {
+    return { focus: await this.focusState(), preview: this.lastPreview ?? null,
+      editor: await this.fn(() => {
+        const input = document.querySelector('input[aria-label="Заголовок"]');
+        return { headingInputPresent: Boolean(input), headingLength: input?.value.length ?? 0,
+          headingMatchesExpected: input?.value === 'Smoke updated heading',
+          iframes: Array.from(document.querySelectorAll('iframe')).map(el => ({
+            title: el.title, srcdoc: el.hasAttribute('srcdoc'), sandbox: el.getAttribute('sandbox'),
+            srcdocHasExpectedHeading: el.srcdoc.includes('Smoke updated heading'),
+            srcdocHasOriginalHeading: el.srcdoc.includes('Sample card one'),
+          })) };
+      }) };
   }
   healthy() {
     assert.deepEqual(this.errors, [], 'Critical browser JS/console errors');
@@ -271,10 +321,18 @@ async function checkHelp(page, retained = null) {
   const trigger = 'nav[aria-label="Сервисы Tinymods"] [aria-label="Справка текущего инструмента"] button:first-child';
   await page.click(trigger);
   await page.wait(() => Boolean(document.querySelector('dialog#service-help-panel[open]')), 'instruction drawer');
-  await page.key('Tab', 1);
-  assert.equal(await page.fn(() => Boolean(document.activeElement?.closest('#service-help-panel'))), true, 'Shift-Tab stays inside modal');
+  const initialFocus = await page.focusState();
+  assert.equal(initialFocus.first && initialFocus.ariaLabel === 'Закрыть справку', true,
+    'Drawer initially focuses close control: ' + JSON.stringify(initialFocus));
+  // CDP modifiers: Alt=1, Ctrl=2, Meta=4, Shift=8.
+  await page.key('Tab', 8);
+  const backwardFocus = await page.focusState();
+  assert.equal(backwardFocus.inside && backwardFocus.last, true,
+    'Shift-Tab wraps to last control: ' + JSON.stringify(backwardFocus));
   await page.key('Tab');
-  assert.equal(await page.fn(() => document.activeElement?.getAttribute('aria-label')), 'Закрыть справку', 'Tab wraps to first control');
+  const forwardFocus = await page.focusState();
+  assert.equal(forwardFocus.first && forwardFocus.ariaLabel === 'Закрыть справку', true,
+    'Tab wraps to first control: ' + JSON.stringify(forwardFocus));
   await page.clickText('Вопрос-ответ', 'document.querySelector("#service-help-panel")');
   await page.wait(() => document.querySelector('#service-help-panel h2')?.textContent === 'Вопрос-ответ' &&
     document.querySelectorAll('#service-help-panel details').length > 0, 'FAQ contents');
@@ -498,7 +556,8 @@ async function runCase(name, body, options = {}) {
     results.push({ name, status: 'PASS', milliseconds: Date.now() - before, details });
   } catch (error) {
     const diagnostics = { step: activeStep, error: brief(error), consoleErrors: page?.errors ?? [],
-      localNetworkErrors: page?.failures ?? [], interceptionErrors: page?.protocolErrors ?? [] };
+      localNetworkErrors: page?.failures ?? [], interceptionErrors: page?.protocolErrors ?? [],
+      ui: page ? await page.diagnostics().catch(error => ({ error: brief(error) })) : null };
     results.push({ name, status: 'FAIL', diagnostics });
     console.error('FAIL ' + name + ': ' + JSON.stringify(diagnostics));
   } finally {
