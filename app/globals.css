@@ -6894,3 +6894,19 @@ padding: 20px 56px 20px 20px;
 @media (max-width: 959px) {
   .cookie-consent { grid-template-columns: 1fr; padding: 48px 16px 16px; }
 }
+.release-page .optimizer-stage
+  .optimizer-upload-landing
+  .dropzone-landing
+  > .upload-conversion-note {
+  display: block;
+  width: auto;
+  max-width: 680px;
+  margin-top: 9px;
+  color: var(--ui-text-secondary);
+  font-family: var(--ui-font-family);
+  font-size: 14px;
+  font-weight: var(--ui-weight-body);
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+}

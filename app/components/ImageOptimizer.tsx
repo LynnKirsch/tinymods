@@ -1721,8 +1721,9 @@ export default function ImageOptimizer() {
           </p>
 
           <small>
-            PNG · JPEG · HEIC / HEIF · WebP · AVIF · до 40 МБ каждый
+            PNG · JPEG · HEIC / HEIF · ДО 40 МБ КАЖДЫЙ
           </small>
+          <span className="upload-conversion-note">Конвертация в WebP и AVIF</span>
         </div>
       </section>
     ) : (
