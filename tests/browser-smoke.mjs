@@ -428,12 +428,75 @@ async function checkHelp(page, retained = null) {
   if (retained) assert.equal(await page.fn(selector => document.querySelector(selector)?.value, retained.selector), retained.value, 'Help preserves input state');
 }
 
+async function checkFooterAndBanner(page, theme) {
+  step('shared footer and neutral cookie geometry / ' + theme);
+  const widths = [320, 390, 479, 480, 639, 640, 959, 960, 1199, 1200, 1439, 1440, 1919, 1920, 2559, 2560];
+  await page.wait(() => document.querySelectorAll('.cookie-consent').length === 1, 'one shared cookie banner');
+  await page.fn(async () => { await document.fonts.ready; });
+  for (const width of widths) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    const ui = await page.fn(async () => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const footer = document.querySelector('[data-tinymods-footer]');
+      const banner = document.querySelector('.cookie-consent');
+      const image = footer.querySelector('img');
+      const r = footer.getBoundingClientRect(), ir = image.getBoundingClientRect(), b = banner.getBoundingClientRect();
+      const primary = banner.querySelector('.is-primary'), secondary = banner.querySelector('.cookie-consent-actions button:not(.is-primary)');
+      const close = banner.querySelector('.cookie-consent-close').getBoundingClientRect();
+      const title = banner.querySelector('strong').getBoundingClientRect();
+      return { count: document.querySelectorAll('[data-tinymods-footer]').length,
+        theme: footer.dataset.tinymodsFooter, accent: getComputedStyle(footer).getPropertyValue('--ui-accent').trim(),
+        overflow: document.documentElement.scrollWidth > innerWidth + 2 || footer.scrollWidth > footer.clientWidth + 2,
+        footerFits: r.left >= -2 && r.right <= innerWidth + 2,
+        logoFits: ir.width > 0 && ir.left >= r.left - 2 && ir.right <= r.right + 2,
+        logoRatio: ir.width / ir.height, logoSrc: image.getAttribute('src'),
+        bannerFits: b.left >= -2 && b.right <= innerWidth + 2 && banner.scrollWidth <= banner.clientWidth + 2,
+        closeOverlapsTitle: close.left < title.right && close.right > title.left && close.top < title.bottom && close.bottom > title.top,
+        background: getComputedStyle(banner).backgroundColor,
+        headingColor: getComputedStyle(banner.querySelector('strong')).color,
+        primaryBackground: getComputedStyle(primary).backgroundColor, primaryColor: getComputedStyle(primary).color,
+        secondaryBackground: getComputedStyle(secondary).backgroundColor,
+        iconAbsent: !banner.querySelector('.cookie-consent-mark'),
+        vk: footer.querySelector('.footer-contact a').textContent.trim(), copyright: footer.querySelector('.footer-copyright').textContent.trim() };
+    });
+    assert.equal(ui.count, 1, 'one footer at ' + width);
+    assert.equal(ui.theme, theme);
+    assert.equal(ui.accent.toLowerCase(), theme === 'editor' ? '#5b7cfa' : '#3f7847');
+    assert.equal(ui.overflow, false, theme + ' no horizontal overflow at ' + width);
+    assert.equal(ui.footerFits && ui.logoFits && ui.bannerFits, true, theme + ' footer/banner fit at ' + width);
+    assert.equal(ui.closeOverlapsTitle, false, 'close does not overlap title at ' + width);
+    assert.ok(Math.abs(ui.logoRatio - 1997 / 385) < .02, 'author SVG proportions at ' + width);
+    assert.equal(ui.logoSrc, '/brand/tinymods-logo.svg?v=1a069a98abb4');
+    assert.equal(ui.background, 'rgb(255, 255, 255)');
+    assert.equal(ui.headingColor, 'rgb(37, 41, 43)');
+    assert.equal(ui.primaryBackground, 'rgb(52, 57, 60)');
+    assert.equal(ui.primaryColor, 'rgb(255, 255, 255)');
+    assert.equal(ui.secondaryBackground, 'rgb(255, 255, 255)');
+    assert.equal(ui.iconAbsent, true);
+    assert.equal(ui.vk, 'Напишите в ВК');
+    assert.equal(ui.copyright, '© 2026 Tinymods. Сервис, дизайн и материалы защищены авторским правом.');
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.fn(() => scrollTo({ top: 0, behavior: 'instant' }));
+  console.log('Footer/banner geometry and computed colors PASS: ' + theme + ' at ' + widths.join('/'));
+}
+
+async function checkFooterSettings(page) {
+  await page.click('[data-tinymods-footer] .cookie-settings-button');
+  await page.wait(() => document.querySelectorAll('.cookie-consent').length === 1, 'footer opens the single cookie banner');
+  await page.click('.cookie-consent-close');
+  await page.wait(() => !document.querySelector('.cookie-consent'), 'cookie close preserves saved choice');
+  await page.fn(() => scrollTo({ top: 0, behavior: 'instant' }));
+}
+
 async function imageScenario(page) {
   await page.navigate('/');
   await page.wait(() => Boolean(document.querySelector('.dropzone')), 'Optimizer upload UI');
   await page.wait(() => Boolean(document.querySelector('.cookie-consent')), 'fresh consent UI');
+  await checkFooterAndBanner(page, 'optima');
   await page.clickText('Только необходимые', 'document.querySelector(".cookie-consent")');
   await page.wait(() => !document.querySelector('.cookie-consent'), 'dismiss banner via necessary choice');
+  await checkFooterSettings(page);
   // Native browser Canvas makes the synthetic input JPEG; it is never an output substitute.
   const jpeg = await page.fn(() => {
     const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 192;
@@ -527,6 +590,10 @@ async function imageScenario(page) {
 async function editorScenario(page) {
   await page.navigate('/html-content-editor/');
   await page.wait(() => Boolean(document.querySelector('#block-1-fragment-1')), 'Editor code input');
+  await checkFooterAndBanner(page, 'editor');
+  await page.clickText('Только необходимые', 'document.querySelector(".cookie-consent")');
+  await page.wait(() => !document.querySelector('.cookie-consent'), 'Editor necessary choice');
+  await checkFooterSettings(page);
   assert.equal(await page.fn(() => Array.from(document.querySelectorAll('label,button,h2,h3')).some(el => /^(Проект|Проекты|Сохранить проект|Восстановить проект)$/i.test(el.textContent.trim()))), false);
   const fixture = await readFile('tests/fixtures/html-content-editor/responsive-slider.html', 'utf8');
   const article = fixture.match(/<article\b[\s\S]*?<\/article>/)?.[0];

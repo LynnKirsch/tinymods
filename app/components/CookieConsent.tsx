@@ -193,24 +193,18 @@ export function CookieConsent() {
         ×
       </button>
 
-      <div>
-        <span className="cookie-consent-mark" aria-hidden="true">
-          O
-        </span>
+      <div className="cookie-consent-copy">
+        <strong>Настройки cookie</strong>
 
-        <div>
-          <strong>Настройки cookie</strong>
+        <p>
+          Optima сохраняет ваш выбор на устройстве. Яндекс Метрика
+          включается только после вашего согласия. Изображения
+          по-прежнему обрабатываются локально в браузере.
+        </p>
 
-          <p>
-            Optima сохраняет ваш выбор на устройстве. Яндекс Метрика
-            включается только после вашего согласия. Изображения
-            по-прежнему обрабатываются локально в браузере.
-          </p>
-
-          <a href="/privacy">
-            Подробнее в политике
-          </a>
-        </div>
+        <a href="/privacy">
+          Подробнее в политике
+        </a>
       </div>
 
       <div className="cookie-consent-actions">

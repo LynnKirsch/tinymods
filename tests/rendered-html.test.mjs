@@ -53,7 +53,7 @@ test("current Next production HTML contains the approved hero, navigation and pr
   assert.match(html, /JPEG поддерживается только на входе/);
   assert.match(html, /Для фотографий создаются AVIF и WebP/);
   assert.match(html, /WebApplication/);
-  assert.match(html, /<img[^>]*alt="Tinymods"[^>]*src="\/brand\/tinymods-logo\.svg\?v=da2261dccb4d"/);
+  assert.match(html, /<footer[^>]*data-tinymods-footer="optima"[\s\S]*?<img[^>]*src="\/brand\/tinymods-logo\.svg\?v=1a069a98abb4"/);
   for (const route of ["index", "privacy", "html-content-editor"]) {
     const page = await readFile(new URL(`../.next/server/app/${route}.html`, import.meta.url), "utf8");
     assert.match(page, /rel="icon"[^>]*href="\/favicon\.svg\?v=tinymods-v1"/);
@@ -71,7 +71,15 @@ test("current Next production HTML contains the approved hero, navigation and pr
   assert.match(privacy, /Перейти в оптимизатор/);
   assert.match(privacy, /Настройки cookie/);
   assert.match(privacy, /href="https:\/\/tinymods\.ru\/privacy\/?"/);
-  assert.match(html, /FAQPage/);
+  assert.doesNotMatch(html, /FAQPage|class="release-faq"/);
+  for (const [route, theme] of [["index", "optima"], ["html-content-editor", "editor"]]) {
+    const output = await readFile(new URL(`../.next/server/app/${route}.html`, import.meta.url), "utf8");
+    assert.match(output, new RegExp(`data-tinymods-footer="${theme}"`));
+    assert.match(output, /Напишите в ВК/);
+    assert.match(output, /© 2026 Tinymods\. Сервис, дизайн и материалы защищены авторским правом\./);
+    assert.match(output, /ИНН 423400473018/);
+    assert.match(output, /ОГРНИП 323220200088967/);
+  }
   assert.doesNotMatch(html, /Retina|сборка ZIP|локальный ZIP|до восьми|для скриншотов — PNG/);
 });
 

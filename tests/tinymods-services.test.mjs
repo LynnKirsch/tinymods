@@ -109,7 +109,7 @@ for (const [pathname, theme, activeHref] of [
     assert.equal(logo.type, "Link");
     assert.equal(logo.props.href, "/");
     assert.equal(logo.props["aria-label"], "Tinymods — главная");
-    assert.equal(logo.props.children.props.src, "/brand/tinymods-logo.svg?v=da2261dccb4d");
+    assert.equal(logo.props.children.props.src, "/brand/tinymods-logo.svg?v=1a069a98abb4");
     assert.equal(logo.props.children.props.alt, "");
     assert.equal(logo.props.children.props.width / logo.props.children.props.height, 1961 / 385);
     const links = nav.props.children[1].props.children;
@@ -227,9 +227,9 @@ test("build-time help uses the prepared docs and shares the exact FAQ source wit
   assert.match(instruction, /до 10 изображений/);
   assert.match(instruction, /выбрано 85/);
   const page = readFileSync(new URL("../app/(tools)/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /IMAGE_OPTIMIZER_FAQ as FAQ_ITEMS/);
-  assert.equal((page.match(/FAQ_ITEMS\.map/g) ?? []).length, 2);
-  assert.doesNotMatch(page, /const FAQ_ITEMS/);
+  assert.doesNotMatch(page, /release-faq|FAQPage|FAQ_ITEMS/);
+  assert.match(tabsSource, /content\?\.faq\.map/);
+  assert.ok(help["image-optimizer"].faq.length > 0);
   const client = tabsSource + curtainSource + readFileSync(new URL("ServiceHelpDrawer.tsx", shellUrl), "utf8");
   assert.doesNotMatch(client, /node:fs|readFile\(|fetch\(|dangerouslySetInnerHTML/);
   assert.equal(help["html-content-editor"].instruction.filter(block => block.kind === "heading").length, 11);

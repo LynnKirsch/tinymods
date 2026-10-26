@@ -3133,8 +3133,7 @@ footer {
   gap: clamp(48px, 8vw, 120px);
   border-top: 1px solid var(--line);
 }
-.release-how h2,
-.release-faq h2 {
+.release-how h2 {
   margin: 0;
   font-family: Inter, Manrope, "Segoe UI", Arial, sans-serif;
   font-size: clamp(34px, 3.2vw, 48px);
@@ -3157,34 +3156,6 @@ footer {
 .release-how li span { display: flex; flex-direction: column; }
 .release-how li strong { font-size: 16px; }
 .release-how li small { margin-top: 6px; color: #69736e; font-size: 12px; }
-.release-faq {
-  width: min(1240px, calc(100% - 64px));
-  margin: 0 auto;
-  padding: 104px 0 116px;
-  display: grid;
-  grid-template-columns: minmax(280px, .7fr) minmax(520px, 1.3fr);
-  gap: clamp(48px, 8vw, 120px);
-  border-top: 1px solid var(--line);
-}
-.faq-list { border-top: 1px solid var(--line); }
-.faq-list details { border-bottom: 1px solid var(--line); }
-.faq-list summary {
-  min-height: 74px;
-  padding: 18px 2px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 750;
-  list-style: none;
-}
-.faq-list summary::-webkit-details-marker { display: none; }
-.faq-list summary i { color: #718134; font-family: Inter, Manrope, "Segoe UI", Arial, sans-serif; font-size: 25px; font-style: normal; transition: transform 180ms ease; }
-.faq-list details[open] summary i { transform: rotate(45deg); }
-.faq-answer { padding: 0 42px 22px 0; }
-.faq-answer > p { margin: -4px 0 0; color: #64706a; font-size: 13px; line-height: 1.65; }
 .faq-code-example { margin-top: 18px; }
 .faq-code-example > span {
   display: block;
@@ -3235,16 +3206,14 @@ footer {
 }
 
 @media (max-width: 1120px) {
-  .release-how,
-  .release-faq { grid-template-columns: 1fr; gap: 48px; }
+  .release-how { grid-template-columns: 1fr; gap: 48px; }
 }
 
 @media (max-width: 680px) {
   .release-header,
-  .optimizer-stage,
-  .release-how,
-  .release-faq,
-  .release-footer { width: calc(100% - 28px); }
+.optimizer-stage,
+.release-how,
+.release-footer { width: calc(100% - 28px); }
   .release-header { min-height: 72px; }
   .release-header nav a:first-child { display: none; }
   .release-header nav { gap: 14px; }
@@ -3254,9 +3223,7 @@ footer {
   .optimizer-stage { padding-bottom: 80px; }
   .processing-mode { padding: 12px; grid-template-columns: 1fr; }
   .processing-mode label { min-height: 60px; }
-  .release-how,
-  .release-faq { padding: 74px 0; }
-  .release-faq { gap: 36px; }
+  .release-how { padding: 74px 0; }
   .release-footer { grid-template-columns: 1fr; gap: 18px; text-align: left; }
   .release-footer p { text-align: left; }
 }
@@ -3277,7 +3244,6 @@ footer {
 .release-hero,
 .optimizer-stage,
 .release-how,
-.release-faq,
 .release-footer {
   width: calc(100% - (var(--page-gutter) * 2));
   max-width: none;
@@ -3286,7 +3252,6 @@ footer {
 .release-hero,
 .optimizer-stage,
 .release-how,
-.release-faq,
 .release-footer {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   column-gap: var(--grid-gap);
@@ -3302,12 +3267,9 @@ footer {
   width: 100%;
   grid-column: 2 / 12;
 }
-.release-how,
-.release-faq { display: grid; row-gap: 0; }
-.release-how > h2,
-.release-faq > .release-faq-heading { grid-column: 1 / 5; }
-.release-how > ol,
-.release-faq > .faq-list { grid-column: 5 / 13; }
+.release-how { display: grid; row-gap: 0; }
+.release-how > h2 { grid-column: 1 / 5; }
+.release-how > ol { grid-column: 5 / 13; }
 .release-footer { display: grid; }
 .release-footer > .brand { grid-column: 1 / 4; justify-self: start; }
 .release-footer > p { grid-column: 4 / 10; }
@@ -3323,11 +3285,10 @@ footer {
   }
 
   .release-header,
-  .release-hero,
-  .optimizer-stage,
-  .release-how,
-  .release-faq,
-  .release-footer {
+.release-hero,
+.optimizer-stage,
+.release-how,
+.release-footer {
     width: calc(100% - (var(--page-gutter) * 2));
   }
 
@@ -4196,22 +4157,18 @@ footer {
 
 
 
-  .release-how,
-  .release-faq {
+  .release-how {
     padding: 68px 0;
 
     row-gap: 34px;
   }
 
   .release-how > h2,
-  .release-faq > .release-faq-heading,
-  .release-how > ol,
-  .release-faq > .faq-list {
+.release-how > ol {
     grid-column: 1 / 13;
   }
 
-  .release-how h2,
-  .release-faq h2 {
+  .release-how h2 {
     font-size: 30px;
   }
 
@@ -4238,34 +4195,6 @@ footer {
 
     font-size: 13px;
     line-height: 1.45;
-  }
-
-
-
-  .faq-list summary {
-    min-height: 74px;
-
-    padding: 18px 0;
-
-    gap: 14px;
-
-    font-size: 14px;
-    line-height: 1.45;
-  }
-
-  .faq-list summary i {
-    flex: 0 0 auto;
-  }
-
-  .faq-answer {
-    padding: 0 0 28px;
-  }
-
-  .faq-answer > p {
-    margin-right: 0;
-
-    font-size: 13px;
-    line-height: 1.7;
   }
 
   .faq-code-example {
@@ -4373,18 +4302,6 @@ footer {
     gap: 17px;
 
     border-radius: var(--ui-radius-md);
-  }
-
-  .cookie-consent > div:first-child {
-    gap: 11px;
-  }
-
-  .cookie-consent-mark {
-    width: 34px;
-    height: 34px;
-    flex-basis: 34px;
-
-    font-size: 18px;
   }
 
   .cookie-consent strong {
@@ -4500,15 +4417,10 @@ footer {
   .results { padding: 15px; }
   .profile-grid .profile-card.is-custom-profile > label { padding-right: 15px; padding-bottom: 64px; }
   .custom-profile-actions { top: auto; right: auto; bottom: 14px; left: 15px; }
-  .release-how,
-  .release-faq { padding: 64px 0; row-gap: 32px; }
+  .release-how { padding: 64px 0; row-gap: 32px; }
   .release-how > h2,
-  .release-faq > .release-faq-heading,
-  .release-how > ol,
-  .release-faq > .faq-list { grid-column: 1 / 13; }
-  .release-how h2,
-  .release-faq h2 { font-size: 32px; }
-  .faq-answer { padding-right: 0; }
+.release-how > ol { grid-column: 1 / 13; }
+  .release-how h2 { font-size: 32px; }
   .faq-code-example pre { padding: 14px; font-size: 12px; }
   .release-footer > .brand { grid-column: 1 / 5; }
   .release-footer > p { grid-column: 5 / 10; }
@@ -4530,14 +4442,10 @@ footer {
   .optimizer-stage .dropzone { min-height: 258px; padding: 34px 22px; }
   .optimizer-body,
   .results { padding: 18px; }
-  .release-how,
-  .release-faq { padding: 72px 0; row-gap: 36px; }
+  .release-how { padding: 72px 0; row-gap: 36px; }
   .release-how > h2,
-  .release-faq > .release-faq-heading,
-  .release-how > ol,
-  .release-faq > .faq-list { grid-column: 1 / 13; }
-  .release-how h2,
-  .release-faq h2 { font-size: 36px; }
+.release-how > ol { grid-column: 1 / 13; }
+  .release-how h2 { font-size: 36px; }
 }
 
 
@@ -4550,10 +4458,8 @@ footer {
   .optimizer-stage .dropzone { min-height: 292px; }
   .optimizer-body,
   .results { padding: 24px; }
-  .release-how,
-  .release-faq { padding: 90px 0; }
-  .release-how h2,
-  .release-faq h2 { font-size: 44px; }
+  .release-how { padding: 90px 0; }
+  .release-how h2 { font-size: 44px; }
 }
 
 
@@ -4669,19 +4575,6 @@ padding: 20px 56px 20px 20px;
   border-radius: var(--ui-radius-md);
   background: var(--ui-surface-1);
   box-shadow: var(--ui-shadow-md);
-}
-.cookie-consent > div:first-child { display: flex; align-items: flex-start; gap: 14px; }
-.cookie-consent-mark {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--ui-accent-ink);
-  color: var(--ui-text-on-accent);
-  font-size: 20px;
-  font-style: italic;
 }
 .cookie-consent strong { display: block; font-size: 15px; }
 .cookie-consent p { max-width: 680px; margin: 6px 0 5px; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.55; }
@@ -4844,13 +4737,9 @@ padding: 20px 56px 20px 20px;
   .batch-queue,
   .result-stage,
   .format-comparison { margin-top: 28px; }
-  .release-how,
-  .release-faq { padding: 72px 0; row-gap: 38px; }
+  .release-how { padding: 72px 0; row-gap: 38px; }
   .release-how li { min-height: 88px; padding: 20px 0; }
   .release-how li small { margin-top: 8px; font-size: 12px; line-height: 1.5; }
-  .faq-list summary { min-height: 76px; padding: 20px 0; font-size: 14px; line-height: 1.45; }
-  .faq-answer { padding: 0 0 30px; }
-  .faq-answer > p { margin-right: 0; font-size: 13px; line-height: 1.7; }
   .faq-code-example { margin-top: 22px; }
   .faq-code-example pre { padding: 16px; font-size: 12px; }
   .release-footer { padding-bottom: 28px; }
@@ -4914,11 +4803,8 @@ padding: 20px 56px 20px 20px;
   .optimizer-stage .dropzone { min-height: 270px; padding: 38px 22px; }
   .optimizer-body,
   .results { padding: 20px; }
-  .release-how,
-  .release-faq { padding: 78px 0; row-gap: 40px; }
+  .release-how { padding: 78px 0; row-gap: 40px; }
   .release-how li { min-height: 90px; }
-  .faq-list summary { min-height: 78px; padding: 20px 0; }
-  .faq-answer { padding-bottom: 28px; }
   .release-footer { padding-bottom: 30px; }
   .footer-contact { padding: 40px 0; grid-template-columns: 1fr; gap: 24px; }
   .footer-contact a { justify-self: start; }
@@ -5231,26 +5117,22 @@ padding: 20px 56px 20px 20px;
     line-height: 1.4;
   }
 
-  .release-how,
-  .release-faq {
+  .release-how {
     padding: 68px 0;
     grid-template-columns: repeat(12, minmax(0, 1fr));
     column-gap: var(--grid-gap);
     row-gap: 0;
   }
 
-  .release-how > h2,
-  .release-faq > .release-faq-heading {
+  .release-how > h2 {
     grid-column: 1 / 5;
   }
 
-  .release-how > ol,
-  .release-faq > .faq-list {
+  .release-how > ol {
     grid-column: 5 / 13;
   }
 
-  .release-how h2,
-  .release-faq h2 {
+  .release-how h2 {
     max-width: 210px;
     font-size: 33px;
     line-height: 1.04;
@@ -5275,25 +5157,6 @@ padding: 20px 56px 20px 20px;
     margin-top: 5px;
     font-size: 12px;
     line-height: 1.45;
-  }
-
-  .faq-list summary {
-    min-height: 68px;
-    padding: 16px 2px;
-    font-size: 14px;
-  }
-
-  .faq-list summary i {
-    font-size: 22px;
-  }
-
-  .faq-answer {
-    padding: 0 34px 20px 0;
-  }
-
-  .faq-answer > p {
-    font-size: 13px;
-    line-height: 1.6;
   }
 
   .faq-code-example > span {
@@ -5528,13 +5391,11 @@ padding: 20px 56px 20px 20px;
     gap: 18px;
   }
 
-  .release-how,
-  .release-faq {
+  .release-how {
     padding: 100px 0;
   }
 
-  .release-how h2,
-  .release-faq h2 {
+  .release-how h2 {
     font-size: 48px;
   }
 
@@ -5551,15 +5412,6 @@ padding: 20px 56px 20px 20px;
   }
 
   .release-how li small {
-    font-size: 15px;
-  }
-
-  .faq-list summary {
-    min-height: 86px;
-    font-size: 17px;
-  }
-
-  .faq-answer > p {
     font-size: 15px;
   }
 
@@ -5788,13 +5640,11 @@ padding: 20px 56px 20px 20px;
     padding: 12px;
   }
 
-  .release-how,
-  .release-faq {
+  .release-how {
     padding: 112px 0;
   }
 
-  .release-how h2,
-  .release-faq h2 {
+  .release-how h2 {
     font-size: 54px;
   }
 
@@ -5811,15 +5661,6 @@ padding: 20px 56px 20px 20px;
   }
 
   .release-how li small {
-    font-size: 18px;
-  }
-
-  .faq-list summary {
-    min-height: 94px;
-    font-size: 20px;
-  }
-
-  .faq-answer > p {
     font-size: 18px;
   }
 
@@ -6064,13 +5905,11 @@ padding: 20px 56px 20px 20px;
     padding: 14px;
   }
 
-  .release-how,
-  .release-faq {
+  .release-how {
     padding: 128px 0;
   }
 
-  .release-how h2,
-  .release-faq h2 {
+  .release-how h2 {
     font-size: 62px;
   }
 
@@ -6087,15 +5926,6 @@ padding: 20px 56px 20px 20px;
   }
 
   .release-how li small {
-    font-size: 22px;
-  }
-
-  .faq-list summary {
-    min-height: 110px;
-    font-size: 24px;
-  }
-
-  .faq-answer > p {
     font-size: 22px;
   }
 
@@ -6426,17 +6256,11 @@ padding: 20px 56px 20px 20px;
 .release-page .optimizer-shell.has-results > .upload-panel { border-bottom: 1px solid var(--ui-border-soft); }
 .release-page .optimizer-shell.has-results .results { border-top: 1px solid var(--ui-border-soft); }
 .release-page .release-how { border-top: 1px solid var(--ui-border-soft); }
-.release-page .release-how h2, .release-page .release-faq h2 { font-family: var(--ui-font-family); font-weight: var(--ui-weight-heading); }
+.release-page .release-how h2 { font-family: var(--ui-font-family); font-weight: var(--ui-weight-heading); }
 .release-page .release-how li { border-top: 1px solid var(--ui-border-soft); }
 .release-page .release-how li:last-child { border-bottom: 1px solid var(--ui-border-soft); }
 .release-page .release-how li > b { color: var(--ui-text-secondary); font-family: var(--ui-font-family); font-weight: var(--ui-weight-control); }
 .release-page .release-how li small { color: var(--ui-text-secondary); }
-.release-page .release-faq { border-top: 1px solid var(--ui-border-soft); }
-.release-page .faq-list { border-top: 1px solid var(--ui-border-soft); }
-.release-page .faq-list details { border-bottom: 1px solid var(--ui-border-soft); }
-.release-page .faq-list summary { font-weight: var(--ui-weight-control); }
-.release-page .faq-list summary i { color: var(--ui-text-secondary); font-family: var(--ui-font-family); transition: background-color var(--ui-motion-normal) var(--ui-ease), border-color var(--ui-motion-normal) var(--ui-ease), color var(--ui-motion-normal) var(--ui-ease); }
-.release-page .faq-answer > p { color: var(--ui-text-secondary); }
 @media (max-width: 680px) {
   .release-page .release-hero h1 { font-size: clamp(36px, 10.8vw, 48px); }
   .release-page .release-hero > p:not(.hero-free) { font-size: 15px; }
@@ -6509,27 +6333,25 @@ padding: 20px 56px 20px 20px;
   .release-page .format-comparison-title strong { font-size: 17px; }
   .release-page .format-comparison-title small { font-size: 12px; }
   .release-page .warnings { font-size: 12px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 30px; }
+  .release-page .release-how h2 { font-size: 30px; }
   .release-page .release-how li > b { font-size: 19px; }
   .release-page .release-how li strong { font-size: 14px; }
   .release-page .release-how li small { font-size: 13px; }
-  .release-page .faq-list summary { font-size: 14px; }
-  .release-page .faq-answer > p { font-size: 13px; }
 }
 @media (min-width: 480px) and (max-width: 639px) {
   .release-page .release-hero h1 { font-size: 39px; }
   .release-page .release-hero > p:not(.hero-free) { font-size: 14px; }
   .release-page .dropzone strong { font-size: 20px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 32px; }
+  .release-page .release-how h2 { font-size: 32px; }
 }
 @media (min-width: 640px) and (max-width: 959px) {
   .release-page .release-hero h1 { font-size: 45px; }
   .release-page .release-hero > p:not(.hero-free) { font-size: 15px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 36px; }
+  .release-page .release-how h2 { font-size: 36px; }
 }
 @media (min-width: 1200px) and (max-width: 1439px) {
   .release-page .release-hero h1 { font-size: 53px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 44px; }
+  .release-page .release-how h2 { font-size: 44px; }
 }
 @media (max-width: 479px) {
   .release-page .optimizer-stage .optimizer-topline, .release-page .local-badge { font-size: 12px; }
@@ -6541,8 +6363,6 @@ padding: 20px 56px 20px 20px;
   .release-page .dropzone p { font-size: 14px; }
   .release-page .dropzone small { font-size: 12px; }
   .release-page .release-how li small { font-size: 12px; }
-  .release-page .faq-list summary { font-size: 14px; }
-  .release-page .faq-answer > p { font-size: 13px; }
 }
 @media (min-width: 960px) and (max-width: 1199px) {
   .release-page .release-hero h1 { font-size: 44px; }
@@ -6571,13 +6391,10 @@ padding: 20px 56px 20px 20px;
   .release-page .format-comparison-title strong { font-size: 17px; }
   .release-page .format-comparison-title small { font-size: 12px; }
   .release-page .format-comparison > p { font-size: 12px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 33px; }
+  .release-page .release-how h2 { font-size: 33px; }
   .release-page .release-how li > b { font-size: 21px; }
   .release-page .release-how li strong { font-size: 15px; }
   .release-page .release-how li small { font-size: 12px; }
-  .release-page .faq-list summary { font-size: 14px; }
-  .release-page .faq-list summary i { font-size: 22px; }
-  .release-page .faq-answer > p { font-size: 13px; }
 }
 @media (min-width: 1440px) and (max-width: 1919px) {
   .release-page .release-header nav a, .release-page .release-header nav > span { font-size: 14px; }
@@ -6594,12 +6411,10 @@ padding: 20px 56px 20px 20px;
   .release-page .optimizer-stage .upload-icon span { font-size: 30px; }
   .release-page .optimizer-stage .dropzone strong { font-size: 26px; }
   .release-page .optimizer-stage .format-comparison-title strong { font-size: 21px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 48px; }
+  .release-page .release-how h2 { font-size: 48px; }
   .release-page .release-how li > b { font-size: 26px; }
   .release-page .release-how li strong { font-size: 19px; }
   .release-page .release-how li small { font-size: 15px; }
-  .release-page .faq-list summary { font-size: 17px; }
-  .release-page .faq-answer > p { font-size: 15px; }
 }
 @media (min-width: 1920px) and (max-width: 2559px) {
   .release-page .release-header nav a, .release-page .release-header nav > span { font-size: 17px; }
@@ -6618,12 +6433,10 @@ padding: 20px 56px 20px 20px;
   .release-page .optimizer-stage .dropzone p { font-size: 18px; }
   .release-page .optimizer-stage .dropzone small { font-size: 16px; }
   .release-page .optimizer-stage .format-comparison-title strong { font-size: 25px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 54px; }
+  .release-page .release-how h2 { font-size: 54px; }
   .release-page .release-how li > b { font-size: 28px; }
   .release-page .release-how li strong { font-size: 22px; }
   .release-page .release-how li small { font-size: 18px; }
-  .release-page .faq-list summary { font-size: 20px; }
-  .release-page .faq-answer > p { font-size: 18px; }
 }
 @media (min-width: 2560px) {
   .release-page .release-header nav a, .release-page .release-header nav > span { font-size: 20px; }
@@ -6643,12 +6456,10 @@ padding: 20px 56px 20px 20px;
   .release-page .optimizer-stage .dropzone p { font-size: 20px; }
   .release-page .optimizer-stage .dropzone small { font-size: 18px; }
   .release-page .optimizer-stage .format-comparison-title strong { font-size: 30px; }
-  .release-page .release-how h2, .release-page .release-faq h2 { font-size: 62px; }
+  .release-page .release-how h2 { font-size: 62px; }
   .release-page .release-how li > b { font-size: 32px; }
   .release-page .release-how li strong { font-size: 26px; }
   .release-page .release-how li small { font-size: 22px; }
-  .release-page .faq-list summary { font-size: 24px; }
-  .release-page .faq-answer > p { font-size: 22px; }
 }
 .release-page .format-comparison-list .format-result-row { border-bottom: 1px solid var(--ui-border-soft); }
 .release-page .format-comparison-list .format-result-row.is-selected { background: var(--ui-gradient-soft); }
@@ -6662,18 +6473,15 @@ padding: 20px 56px 20px 20px;
 .release-page .optimizer-stage,
 .release-page .release-hero,
 .release-page .release-header nav,
-.release-page .release-how,
-.release-page .release-faq {
+.release-page .release-how {
   font-family: var(--ui-font-family);
   color: var(--ui-text-primary);
   font-weight: var(--ui-weight-body);
 }
 .release-page .optimizer-stage :is(button, input, textarea) { font-family: var(--ui-font-family); }
 .release-page .optimizer-stage :is(strong, b, legend),
-.release-page .release-how strong,
-.release-page .release-faq h2 { font-weight: var(--ui-weight-heading); }
+.release-page .release-how strong { font-weight: var(--ui-weight-heading); }
 .release-page .release-how h2,
-.release-page .release-faq h2,
 .release-page .release-hero h1 {
   font-size: clamp(28px, 2.4vw, 48px);
   line-height: var(--ui-leading-tight);
@@ -7052,4 +6860,37 @@ padding: 20px 56px 20px 20px;
 
 @media (max-width: 479px) {
   .legal-header { min-height: 43px; }
+}
+
+/* Cookie consent has one neutral palette, independent of the current service. */
+.cookie-consent {
+  --ui-surface-1: #FFFFFF;
+  --ui-surface-hover: #F1F2F2;
+  --ui-surface-pressed: #E5E8E9;
+  --ui-text-primary: #25292B;
+  --ui-text-secondary: #62676A;
+  --ui-text-on-accent: #FFFFFF;
+  --ui-border: #D9DCDD;
+  --ui-border-strong: #B8BFC2;
+  --ui-accent: #34393C;
+  --ui-accent-hover: #25292B;
+  --ui-accent-active: #1D2123;
+  --ui-accent-ink: #34393C;
+  --ui-focus-ring: #62676A;
+  --ink: var(--ui-text-primary);
+  padding-right: 56px;
+  font-family: var(--ui-font-family);
+  color: var(--ui-text-primary);
+  background: var(--ui-surface-1);
+  border-color: var(--ui-border);
+  box-shadow: 0 16px 40px rgb(37 41 43 / 10%);
+}
+.cookie-consent-copy { min-width: 0; }
+.cookie-consent a { text-decoration: underline; }
+.cookie-consent-actions button { background: var(--ui-surface-1); color: var(--ui-accent-ink); }
+.cookie-consent-actions button:active { background: var(--ui-surface-pressed); }
+.cookie-consent-actions button.is-primary:active { background: var(--ui-accent-active); }
+.cookie-consent-actions button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 959px) {
+  .cookie-consent { grid-template-columns: 1fr; padding: 48px 16px 16px; }
 }

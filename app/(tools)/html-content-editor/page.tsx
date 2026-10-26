@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import HtmlContentEditor from "../../components/html-content-editor/HtmlContentEditor";
+import TinymodsFooter from "../../components/tinymods-shell/TinymodsFooter";
 
 export const metadata: Metadata = {
   title: "HTML Content Editor — Tinymods",
@@ -16,5 +17,8 @@ export const metadata: Metadata = {
 };
 
 export default function HtmlContentEditorPage() {
-  return <HtmlContentEditor />;
+  return <>
+    <HtmlContentEditor />
+    <TinymodsFooter theme="editor" />
+  </>;
 }
