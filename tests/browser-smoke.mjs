@@ -191,10 +191,64 @@ class Page {
     await this.wait(() => Boolean(document.querySelector('next-route-announcer')), 'Next client hydration');
   }
   async clickExpression(expression) {
-    const point = await this.evaluate('(() => { const el = ' + expression + '; if (!el) throw Error("UI element not found"); if (el.disabled) throw Error("UI control disabled"); el.scrollIntoView({block:"center",inline:"center",behavior:"instant"}); const r=el.getBoundingClientRect(); if(!r.width || !r.height) throw Error("UI element is not visible"); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()');
-    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
-    await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
-    await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+    // Layout and compositor updates after device emulation are asynchronous.
+    const sample = async (scroll = false) => this.evaluate('(async () => { const el = ' + expression + `;
+      if (!el) return { ready: false, found: false };
+      if (el.disabled) throw Error('UI control disabled');
+      if (${scroll}) el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+      const rect = () => { const r=el.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; };
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const before=rect();
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const r=rect(), x=r.x+r.width/2, y=r.y+r.height/2, hit=document.elementFromPoint(x,y);
+      const stable=Object.keys(r).every(key=>Math.abs(r[key]-before[key])<.25);
+      return { found:true, ready:el.isConnected && stable && r.width>0 && r.height>0 && Boolean(hit && (hit===el || el.contains(hit))),
+        x,y,rect:r,stable,hit:{tag:hit?.tagName ?? null,role:hit?.getAttribute('role') ?? null,target:hit===el,withinTarget:Boolean(hit && el.contains(hit))},
+        viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY,visualWidth:visualViewport?.width,visualHeight:visualViewport?.height,scale:visualViewport?.scale,offsetLeft:visualViewport?.offsetLeft,offsetTop:visualViewport?.offsetTop},
+        cookieControl:Boolean(el.closest('.cookie-consent')),
+        action:el.matches('.cookie-consent-close')?'close':el.textContent.trim()==='Только необходимые'?'necessary':el.textContent.trim()==='Разрешить аналитику'?'analytics':'other' };
+    })()`);
+    let last;
+    const point = await until(async () => {
+      last = await sample(true);
+      this.lastClickDiagnostics = { stage: "prepare", before: last };
+      return last.ready ? last : false;
+    }, 'click target visible, stable and hit-testable');
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', buttons: 0, x: point.x, y: point.y });
+    const final = await until(async () => { last=await sample(); this.lastClickDiagnostics={stage:'after hover',before:last}; return last.ready ? last : false; }, 'click hit target after hover');
+    if (final.cookieControl) {
+      this.lastClickDiagnostics = { before: final };
+      await this.evaluate('(() => { const el = ' + expression + `;
+        const original=document.querySelector('.cookie-consent');
+        const choice=()=>{try{const r=JSON.parse(localStorage.getItem('optima-cookie-consent-v1') || 'null');return ['necessary','analytics','dismissed'].includes(r?.choice)?r.choice:'none';}catch{return 'not-readable';}};
+        const events=[];let consentEvents=0,added=0,removed=0;
+        const receive=e=>events.push({type:e.type,trusted:e.isTrusted,target:e.target===el || el.contains(e.target)});
+        const changed=()=>consentEvents++;
+        const isBanner=n=>n.nodeType===1 && (n.matches('.cookie-consent') || n.querySelector('.cookie-consent'));
+        const observer=new MutationObserver(records=>{for(const r of records){added+=Array.from(r.addedNodes).filter(isBanner).length;removed+=Array.from(r.removedNodes).filter(isBanner).length;}});
+        for(const type of ['pointerdown','mousedown','mouseup','click'])document.addEventListener(type,receive,{capture:true,passive:true});
+        window.addEventListener('optima:consent-changed',changed);observer.observe(document.body,{childList:true,subtree:true});
+        const key=Object.keys(el).find(k=>k.startsWith('__reactProps$'));
+        const before={storedChoice:choice(),bannerCount:document.querySelectorAll('.cookie-consent').length,reactOnClick:typeof el[key]?.onClick==='function'};
+        window.__optimaSmokeClickAudit=()=>{observer.disconnect();for(const type of ['pointerdown','mousedown','mouseup','click'])document.removeEventListener(type,receive,true);window.removeEventListener('optima:consent-changed',changed);
+          const current=document.querySelector('.cookie-consent');return {before,events,consentEvents,storedChoice:choice(),bannerPresent:Boolean(current),bannerCount:document.querySelectorAll('.cookie-consent').length,bannerRootReplaced:Boolean(current && current!==original),added,removed};};
+      })()`);
+    }
+    await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, x: final.x, y: final.y });
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, x: final.x, y: final.y });
+    if (final.cookieControl) {
+      const after = await this.fn(async () => {
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const value=window.__optimaSmokeClickAudit();delete window.__optimaSmokeClickAudit;return value;
+      });
+      this.lastClickDiagnostics = { before: final, after };
+      console.log('COOKIE_CLICK ' + JSON.stringify(this.lastClickDiagnostics));
+      assert.ok(after.events.some(e=>e.type==='click' && e.trusted && e.target), 'Real CDP click reached the cookie control: ' + JSON.stringify(this.lastClickDiagnostics));
+      if (['necessary', 'analytics'].includes(final.action)) {
+        assert.ok(after.consentEvents > 0, 'The consent handler emitted optima:consent-changed');
+        if (after.storedChoice !== 'not-readable') assert.equal(after.storedChoice, final.action, 'The real click saved the requested consent choice');
+      }
+    }
   }
   click(selector) { return this.clickExpression('document.querySelector(' + JSON.stringify(selector) + ')'); }
   clickText(text, root = 'document') {
@@ -477,7 +531,8 @@ async function checkFooterAndBanner(page, theme) {
     assert.equal(ui.copyright, '© 2026 Tinymods. Сервис, дизайн и материалы защищены авторским правом.');
   }
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await page.fn(() => scrollTo({ top: 0, behavior: 'instant' }));
+  await page.wait(() => innerWidth === 1440 && innerHeight === 1000, 'restored 1440 viewport');
+  await page.fn(async () => { scrollTo({ top: 0, behavior: 'instant' }); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
   console.log('Footer/banner geometry and computed colors PASS: ' + theme + ' at ' + widths.join('/'));
 }
 
@@ -703,11 +758,15 @@ async function runCase(name, body, options = {}) {
     const details = await body(page);
     results.push({ name, status: 'PASS', milliseconds: Date.now() - before, details });
   } catch (error) {
-    const diagnostics = { step: activeStep, error: brief(error), consoleErrors: page?.errors ?? [],
+    const diagnostics = { step: activeStep, error: brief(error), click: page?.lastClickDiagnostics ?? null, consoleErrors: page?.errors ?? [],
       localNetworkErrors: page?.failures ?? [], interceptionErrors: page?.protocolErrors ?? [],
       ui: page ? await page.diagnostics().catch(error => ({ error: brief(error) })) : null };
     results.push({ name, status: 'FAIL', diagnostics });
     console.error('FAIL ' + name + ': ' + JSON.stringify(diagnostics));
+    if (page?.lastClickDiagnostics) {
+      const safe = JSON.stringify({ scenario: name, step: activeStep, error: brief(error), click: page.lastClickDiagnostics });
+      console.error('::error title=Browser click diagnostic::' + safe.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'));
+    }
   } finally {
     if (page) await page.dispose().catch(error => {
       results.push({ name: name + ' context cleanup', status: 'FAIL', diagnostics: { error: brief(error) } });
