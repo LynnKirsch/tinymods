@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 const METRIKA_ID = 111792380;
 const STORAGE_KEY = "optima-cookie-consent-v1";
@@ -202,9 +203,9 @@ export function CookieConsent() {
           по-прежнему обрабатываются локально в браузере.
         </p>
 
-        <a href="/privacy">
+        <Link href="/privacy">
           Подробнее в политике
-        </a>
+        </Link>
       </div>
 
       <div className="cookie-consent-actions">

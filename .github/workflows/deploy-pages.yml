@@ -18,6 +18,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BASE_PATH: /tinymods
+      NEXT_PUBLIC_SITE_URL: https://lynnkirsch.github.io/tinymods
 
     steps:
       - name: Checkout
@@ -32,8 +35,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify shared navigation
+        run: node --experimental-strip-types --test --test-concurrency=1 tests/tinymods-services.test.mjs
+
       - name: Build static site
         run: npm run build
+
+      - name: Verify GitHub Pages paths and assets
+        run: node scripts/verify-pages-export.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

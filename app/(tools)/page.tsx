@@ -1,7 +1,7 @@
 import ImageOptimizer from "../components/ImageOptimizer";
 import TinymodsFooter from "../components/tinymods-shell/TinymodsFooter";
 
-const SITE_URL = "https://tinymods.ru";
+import { SITE_URL } from "../lib/site-url";
 
 const STRUCTURED_DATA = {
   "@context": "https://schema.org",

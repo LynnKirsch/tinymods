@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { withBasePath } from "../app/lib/site-url.ts";
 import { IMAGE_OPTIMIZER_FAQ, loadServiceHelpContent, parseInstructionMarkdown } from "../app/lib/service-help-content.ts";
 
 import {
@@ -43,6 +44,7 @@ function renderShellComponent(source, pathname, { reducedMotion = false, onServi
       default: new Proxy({}, { get: (_, name) => name }),
     },
     "../../lib/tinymods-services": { getTinymodsServiceByPathname, normalizeTinymodsPathname, TINYMODS_SERVICES },
+    "../../lib/site-url": { withBasePath },
   };
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
@@ -109,7 +111,7 @@ for (const [pathname, theme, activeHref] of [
     assert.equal(logo.type, "Link");
     assert.equal(logo.props.href, "/");
     assert.equal(logo.props["aria-label"], "Tinymods — главная");
-    assert.equal(logo.props.children.props.src, "/brand/tinymods-logo.svg?v=1a069a98abb4");
+    assert.equal(logo.props.children.props.src, withBasePath("/brand/tinymods-logo.svg?v=1a069a98abb4"));
     assert.equal(logo.props.children.props.alt, "");
     assert.equal(logo.props.children.props.width / logo.props.children.props.height, 1961 / 385);
     const links = nav.props.children[1].props.children;

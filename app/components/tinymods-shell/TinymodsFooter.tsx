@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { withBasePath } from "../../lib/site-url";
 import Link from "next/link";
 import { CookieSettingsButton } from "../CookieConsent";
 import styles from "./TinymodsFooter.module.css";
@@ -15,7 +16,7 @@ export default function TinymodsFooter({ theme }: { theme: "optima" | "editor" }
         </div>
         <div className="footer-legal">
           <Link className="brand" href="/" aria-label="Tinymods — главная">
-            <Image src="/brand/tinymods-logo.svg?v=1a069a98abb4" alt="" width={1997} height={385} />
+            <Image src={withBasePath("/brand/tinymods-logo.svg?v=1a069a98abb4")} alt="" width={1997} height={385} />
           </Link>
           <div className="footer-operator">
             <strong>ИП Кирюшкина Е.В.</strong>
@@ -23,7 +24,7 @@ export default function TinymodsFooter({ theme }: { theme: "optima" | "editor" }
             <span>ОГРНИП 323220200088967</span>
           </div>
           <nav aria-label="Юридические документы">
-            <a href="/privacy">Политика обработки персональных данных</a>
+            <Link href="/privacy">Политика обработки персональных данных</Link>
             <CookieSettingsButton />
           </nav>
           <p className="footer-copyright">

@@ -1,8 +1,7 @@
 import type { MetadataRoute } from "next";
+import { SITE_URL } from "./lib/site-url";
 
 export const dynamic = "force-static";
-
-const SITE_URL = "https://tinymods.ru";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -15,6 +14,6 @@ export default function robots(): MetadataRoute.Robots {
       { userAgent: "Perplexity-User", allow: "/" },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,
-    host: SITE_URL,
+    host: new URL(SITE_URL).origin,
   };
 }

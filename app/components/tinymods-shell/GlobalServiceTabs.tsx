@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { withBasePath } from "../../lib/site-url";
 import { useState, type MouseEvent } from "react";
 import ServiceHelpDrawer from "./ServiceHelpDrawer";
 import type { HelpBlock, ServiceHelpContent } from "../../lib/service-help-content";
@@ -35,7 +36,7 @@ export default function GlobalServiceTabs({ onServiceClick, helpContent, selecte
       aria-label="Сервисы Tinymods"
     >
       <Link className={styles.brandLink} href="/" aria-label="Tinymods — главная">
-        <Image src="/brand/tinymods-logo.svg?v=1a069a98abb4" alt="" width={1961} height={385} />
+        <Image src={withBasePath("/brand/tinymods-logo.svg?v=1a069a98abb4")} alt="" width={1961} height={385} />
       </Link>
       <div className={styles.tabScroller}>
         {TINYMODS_SERVICES.map((service) => {

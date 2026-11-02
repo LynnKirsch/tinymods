@@ -4,9 +4,9 @@
 
 ## Сервисы
 
-- [Image Optimizer](https://tinymods.ru/): подготовка изображений, кадрирование, выбор размера и скачивание.
-- [HTML Content Editor](https://tinymods.ru/html-content-editor): редактирование текстов, ссылок, изображений и видео в готовом коде с Preview.
-- [Политика обработки персональных данных](https://tinymods.ru/privacy): локальная обработка, внешние ресурсы Preview и настройки cookie.
+- [Image Optimizer](https://lynnkirsch.github.io/tinymods/): подготовка изображений, кадрирование, выбор размера и скачивание.
+- [HTML Content Editor](https://lynnkirsch.github.io/tinymods/html-content-editor): редактирование текстов, ссылок, изображений и видео в готовом коде с Preview.
+- [Политика обработки персональных данных](https://lynnkirsch.github.io/tinymods/privacy): локальная обработка, внешние ресурсы Preview и настройки cookie.
 
 ## Image Optimizer
 
@@ -40,4 +40,4 @@
 
 ## Дополнительный контекст
 
-- [Полное описание](https://tinymods.ru/llms-full.txt).
+- [Полное описание](https://lynnkirsch.github.io/tinymods/llms-full.txt).
