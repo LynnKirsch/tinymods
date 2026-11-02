@@ -10,6 +10,12 @@ const onest = Onest({
 });
 
 const SITE_URL = "https://tinymods.ru";
+const MIRROR_REDIRECT_SCRIPT = `(() => {
+  const current = window.location;
+  if (current.hostname === "tinymods.ru" || current.hostname === "www.tinymods.ru") {
+    current.replace("https://lynnkirsch.github.io" + current.pathname + current.search + current.hash);
+  }
+})();`;
 const SEO_TITLE = "Умный оптимизатор изображений для сайта — Optima";
 const SEO_DESCRIPTION =
   "Бесплатно сжимайте и конвертируйте PNG, JPEG, HEIC, WebP и AVIF для сайта. Фото и скриншоты обрабатываются в браузере без загрузки на сервер.";
@@ -87,6 +93,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ru" className={onest.variable}>
+      <head>
+        <script
+          id="tinymods-mirror-redirect"
+          dangerouslySetInnerHTML={{ __html: MIRROR_REDIRECT_SCRIPT }}
+        />
+      </head>
       <body>
         {children}
       </body>
