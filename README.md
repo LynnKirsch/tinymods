@@ -2,8 +2,8 @@
 
 Optima provides two free browser tools without registration.
 
-- **[Image Optimizer](https://lynnkirsch.github.io/tinymods/)** prepares website images: crop, resize without upscaling, encode and download.
-- **[HTML Content Editor](https://lynnkirsch.github.io/tinymods/html-content-editor)** edits content in existing HTML blocks with a live Preview.
+- **[Image Optimizer](https://tinymods.ru/)** prepares website images: crop, resize without upscaling, encode and download.
+- **[HTML Content Editor](https://tinymods.ru/html-content-editor)** edits content in existing HTML blocks with a live Preview.
 
 ## Image Optimizer
 
@@ -43,6 +43,6 @@ These commands are documentation, not confirmation that they have been run. Some
 
 ## Product and privacy
 
-[Product description](docs/PRODUCT.md), [privacy policy](https://lynnkirsch.github.io/tinymods/privacy), [concise AI context](https://lynnkirsch.github.io/tinymods/llms.txt) and [full AI context](https://lynnkirsch.github.io/tinymods/llms-full.txt).
+[Product description](docs/PRODUCT.md), [privacy policy](https://tinymods.ru/privacy), [concise AI context](https://tinymods.ru/llms.txt) and [full AI context](https://tinymods.ru/llms-full.txt).
 
 Analytics starts only after consent. Cookie settings can be changed on the privacy page. The tools do not provide accounts, cloud project storage or a public API.
