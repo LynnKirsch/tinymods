@@ -19,8 +19,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_BASE_PATH: /tinymods
-      NEXT_PUBLIC_SITE_URL: https://lynnkirsch.github.io/tinymods
+      NEXT_PUBLIC_BASE_PATH: ""
+      NEXT_PUBLIC_SITE_URL: https://tinymods.ru
 
     steps:
       - name: Checkout
