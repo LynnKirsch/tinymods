@@ -4,8 +4,8 @@
 
 Optima предлагает два бесплатных браузерных инструмента без регистрации:
 
-- Image Optimizer: https://lynnkirsch.github.io/tinymods/
-- HTML Content Editor: https://lynnkirsch.github.io/tinymods/html-content-editor
+- Image Optimizer: https://tinymods.ru/
+- HTML Content Editor: https://tinymods.ru/html-content-editor
 
 ## Image Optimizer: вход и режимы
 
@@ -58,8 +58,8 @@ Optima предлагает два бесплатных браузерных и�
 
 ## Публичные источники
 
-- Image Optimizer и FAQ: https://lynnkirsch.github.io/tinymods/#faq
-- HTML Content Editor: https://lynnkirsch.github.io/tinymods/html-content-editor
-- Политика: https://lynnkirsch.github.io/tinymods/privacy
-- Sitemap: https://lynnkirsch.github.io/tinymods/sitemap.xml
-- Robots: https://lynnkirsch.github.io/tinymods/robots.txt
+- Image Optimizer и FAQ: https://tinymods.ru/#faq
+- HTML Content Editor: https://tinymods.ru/html-content-editor
+- Политика: https://tinymods.ru/privacy
+- Sitemap: https://tinymods.ru/sitemap.xml
+- Robots: https://tinymods.ru/robots.txt
