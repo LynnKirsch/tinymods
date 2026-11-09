@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { withBasePath } from "../app/lib/site-url.ts";
 import { IMAGE_OPTIMIZER_FAQ, loadServiceHelpContent, parseInstructionMarkdown } from "../app/lib/service-help-content.ts";
 
 import {
@@ -17,7 +18,7 @@ const tabsSource = readFileSync(new URL("GlobalServiceTabs.tsx", shellUrl), "utf
 const curtainSource = readFileSync(new URL("ServiceCurtainTransition.tsx", shellUrl), "utf8");
 const shellCss = readFileSync(new URL("TinymodsToolsShell.module.css", shellUrl), "utf8");
 
-function renderShellComponent(source, pathname, { reducedMotion = false, onServiceClick, helpContent, helpView = null } = {}) {
+function renderShellComponent(source, pathname, { reducedMotion = false, onServiceClick, helpContent, helpView = null, selectedServiceId } = {}) {
   const calls = [];
   const jsx = (type, props, key) => ({ type, props, key });
   const exports = {};
@@ -30,6 +31,7 @@ function renderShellComponent(source, pathname, { reducedMotion = false, onServi
       useRouter: () => ({ push: (...args) => calls.push(["push", ...args]) }),
     },
     "next/link": { __esModule: true, default: "Link" },
+    "next/image": { __esModule: true, default: "Image" },
     "motion/react": {
       AnimatePresence: "AnimatePresence",
       motion: { div: "motion.div" },
@@ -41,7 +43,8 @@ function renderShellComponent(source, pathname, { reducedMotion = false, onServi
       __esModule: true,
       default: new Proxy({}, { get: (_, name) => name }),
     },
-    "../../lib/tinymods-services": { getTinymodsServiceByPathname, TINYMODS_SERVICES },
+    "../../lib/tinymods-services": { getTinymodsServiceByPathname, normalizeTinymodsPathname, TINYMODS_SERVICES },
+    "../../lib/site-url": { withBasePath },
   };
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
@@ -50,7 +53,7 @@ function renderShellComponent(source, pathname, { reducedMotion = false, onServi
     exports,
     require: (name) => mocks[name] ?? nativeRequire(name),
   });
-  return { tree: exports.default({ children: "tool content", onServiceClick, helpContent }), calls };
+  return { tree: exports.default({ children: "tool content", onServiceClick, helpContent, selectedServiceId }), calls };
 }
 
 test("lists only published Tinymods tool routes", () => {
@@ -104,13 +107,21 @@ for (const [pathname, theme, activeHref] of [
     assert.equal(nav.type, "nav");
     assert.equal(nav.props["aria-label"], "Сервисы Tinymods");
     assert.equal(nav.props.style, undefined);
-    const links = nav.props.children[0].props.children;
+    const logo = nav.props.children[0];
+    assert.equal(logo.type, "Link");
+    assert.equal(logo.props.href, "/");
+    assert.equal(logo.props["aria-label"], "Tinymods — главная");
+    assert.equal(logo.props.children.props.src, withBasePath("/brand/tinymods-logo.svg?v=1a069a98abb4"));
+    assert.equal(logo.props.children.props.alt, "");
+    assert.equal(logo.props.children.props.width / logo.props.children.props.height, 1961 / 385);
+    const links = nav.props.children[1].props.children;
     assert.deepEqual(Array.from(links, (link) => link.props.href), ["/", "/html-content-editor"]);
     for (const [index, link] of links.entries()) {
       const active = link.props.href === activeHref;
       assert.equal(link.props["aria-current"], active ? "page" : undefined);
       assert.equal(link.props.className, active ? "tab activeTab" : "tab");
       assert.equal(link.props.style, undefined);
+      assert.equal(link.props["data-ui-theme"], index === 1 ? "editor" : undefined);
       assert.equal(Boolean(link.props.children[0]), active);
       if (active) assert.equal(link.props.children[0].props["aria-hidden"], "true");
       const event = { button: 0 };
@@ -186,7 +197,10 @@ test("shell retains responsive gutters, tab scrolling and working area geometry"
     const padding = gutters.filter(([min]) => width >= min).at(-1)?.[1] ?? 15;
     assert.equal(padding, expected, `gutter at ${width}px`);
   }
-  assert.match(shellCss, /\.tabs\s*\{[^}]*position: absolute;[^}]*inset: 0 0 auto;[^}]*padding: 0 15px;/);
+  assert.match(shellCss, /\.tabs\s*\{[^}]*position: relative;[^}]*padding: 0 15px;[^}]*display: grid;[^}]*grid-template-columns: repeat\(12, minmax\(0, 1fr\)\);/);
+  assert.match(shellCss, /\.brandLink\s*\{[^}]*grid-column: 1 \/ 5;[^}]*display: inline-flex;/);
+  assert.match(shellCss, /\.brandLink img\s*\{[^}]*max-width: 100%;[^}]*height: auto;/);
+  assert.doesNotMatch(shellCss.match(/\.brandLink\s*\{([^}]*)\}/)[1], /position:\s*absolute|margin-left|transform/);
   assert.match(shellCss, /\.tabScroller\s*\{[^}]*display: flex;[^}]*overflow-x: auto;[^}]*overflow-y: hidden;/);
   assert.match(shellCss, /\.pageStack\s*\{[^}]*display: grid;[^}]*overflow-x: clip;/);
   assert.match(shellCss, /\.pageLayer\s*\{[^}]*grid-area: 1 \/ 1;[^}]*contain: paint;[^}]*will-change: transform;/);
@@ -215,9 +229,9 @@ test("build-time help uses the prepared docs and shares the exact FAQ source wit
   assert.match(instruction, /до 10 изображений/);
   assert.match(instruction, /выбрано 85/);
   const page = readFileSync(new URL("../app/(tools)/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /IMAGE_OPTIMIZER_FAQ as FAQ_ITEMS/);
-  assert.equal((page.match(/FAQ_ITEMS\.map/g) ?? []).length, 2);
-  assert.doesNotMatch(page, /const FAQ_ITEMS/);
+  assert.doesNotMatch(page, /release-faq|FAQPage|FAQ_ITEMS/);
+  assert.match(tabsSource, /content\?\.faq\.map/);
+  assert.ok(help["image-optimizer"].faq.length > 0);
   const client = tabsSource + curtainSource + readFileSync(new URL("ServiceHelpDrawer.tsx", shellUrl), "utf8");
   assert.doesNotMatch(client, /node:fs|readFile\(|fetch\(|dangerouslySetInnerHTML/);
   assert.equal(help["html-content-editor"].instruction.filter(block => block.kind === "heading").length, 11);
@@ -227,7 +241,7 @@ test("help buttons open the current service content without navigation or replac
   const helpContent = await loadServiceHelpContent();
   for (const [path, theme] of [["/", "optima"], ["/html-content-editor", "editor"]]) {
     const { tree: nav, calls } = renderShellComponent(tabsSource, path, { helpContent, helpView: "faq" });
-    const [, actions, drawer] = nav.props.children;
+    const [, , actions, drawer] = nav.props.children;
     assert.equal(actions.props.children.length, 2);
     actions.props.children[0].props.onClick();
     actions.props.children[1].props.onClick();
@@ -240,4 +254,15 @@ test("help buttons open the current service content without navigation or replac
     drawer.props.onClose();
     assert.equal(calls.at(-1)[1], null);
   }
+});
+
+test("Privacy selects the blue Editor tab without claiming a different URL is current", () => {
+  const { tree } = renderShellComponent(tabsSource, "/privacy/", { selectedServiceId: "html-content-editor" });
+  const links = tree.props.children[1].props.children;
+  assert.equal(links[0].props.className, "tab");
+  assert.equal(links[1].props.className, "tab activeTab");
+  assert.equal(links[1].props["data-ui-theme"], "editor");
+  assert.equal(links[0].props["aria-current"], undefined);
+  assert.equal(links[1].props["aria-current"], undefined);
+  assert.equal(tree.props.children[2], null);
 });

@@ -1,9 +1,9 @@
 # Optima — UI Design System V2
 ## Shared geometry with service themes
 
-**Status:** canonical visual system for the Optima application  
-**Scope:** Image Optimizer, HTML Content Editor, shared shell, drawers, dialogs and future Optima tools  
-**Reference direction:** attached LABLY interface references supplied by the user  
+**Status:** canonical visual system for the Optima application\
+**Scope:** Image Optimizer, HTML Content Editor, shared shell, drawers, dialogs and future Optima tools\
+**Reference direction:** attached LABLY interface references supplied by the user\
 **Version:** 2.0
 
 ---
@@ -42,7 +42,7 @@ It must not feel:
 - glossy or futuristic;
 - excessively glassmorphic.
 
-The references use green as an atmosphere, not as decoration on every control.  
+The references use green as an atmosphere, not as decoration on every control.\
 White space remains the main visual material.
 
 ---

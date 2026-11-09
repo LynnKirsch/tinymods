@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SITE_URL as CURRENT_SITE_URL } from "../lib/site-url";
+import GlobalServiceTabs from "../components/tinymods-shell/GlobalServiceTabs";
 import { CookieConsent, CookieSettingsButton } from "../components/CookieConsent";
-
-const CURRENT_SITE_URL = "https://tinymods.ru";
 
 export const metadata: Metadata = {
   title: "Политика обработки персональных данных — Optima",
   description:
     "Политика ИП Кирюшкиной Е.В. в отношении обработки персональных данных пользователей сервиса Optima.",
-  alternates: { canonical: "/privacy" },
+  alternates: { canonical: `${CURRENT_SITE_URL}/privacy` },
   robots: { index: true, follow: true },
 };
 
@@ -28,17 +28,13 @@ const POLICY_DATA = {
 
 export default function PrivacyPage() {
   return (
-    <main className="legal-page">
+    <main className="legal-page" data-ui-theme="editor">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(POLICY_DATA) }}
       />
       <header className="legal-header">
-        <Link className="brand" href="/" aria-label="Вернуться в Optima">
-          <span className="brand-mark" aria-hidden="true">O</span>
-          <span><strong>Оптима</strong><small>Image Optimizer</small></span>
-        </Link>
-        <Link href="/">← Вернуться в оптимизатор</Link>
+        <GlobalServiceTabs selectedServiceId="html-content-editor" />
       </header>
 
       <article className="legal-document">
@@ -47,7 +43,7 @@ export default function PrivacyPage() {
           <p className="legal-date">Редакция от 21 октября 2026 года</p>
           <p>
             Настоящая Политика описывает, как сервис Optima обрабатывает информацию
-            пользователей. Она действует для сайта <strong>tinymods.ru</strong> и его
+            пользователей. Она действует для сайта <strong>{CURRENT_SITE_URL.replace(/^https?:\/\//, "")}</strong> и его
             текущей публичной версии.
           </p>
         </header>

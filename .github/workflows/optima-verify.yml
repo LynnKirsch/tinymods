@@ -232,6 +232,12 @@ jobs:
           console.log('Static export checks passed; nothing uploaded or deployed.');
           NODE
 
+      - name: Chrome browser acceptance (local static export, no external sends)
+        id: browser
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.assets.outcome == 'success' }}
+        timeout-minutes: 6
+        run: node tests/browser-smoke.mjs
+
       - name: Current Next HTML and public product context tests
         id: html
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -240,7 +246,7 @@ jobs:
           --test-name-pattern='^(current Next production HTML contains the approved hero, navigation and product content|current HTML editor production page renders code loader without Project controls|publishes concise and extended AI-readable product context)$'
           tests/rendered-html.test.mjs
 
-      - name: Report outcomes and browser coverage limit
+      - name: Report outcomes and browser acceptance
         if: always()
         env:
           INSTALL: ${{ steps.install.outcome }}
@@ -254,6 +260,7 @@ jobs:
           BUILD: ${{ steps.build.outcome }}
           ASSETS: ${{ steps.assets.outcome }}
           HTML: ${{ steps.html.outcome }}
+          BROWSER: ${{ steps.browser.outcome }}
         run: |
           {
             printf '## Optima two-service verification (no deployment)\n\n'
@@ -262,8 +269,8 @@ jobs:
             printf '| AVIF Node/WASM tests | %s |\n| Image Optimizer | %s |\n| Navigation/help | %s |\n' "$AVIF" "$IMAGES" "$HELP"
             printf '| Editor core/repository | %s |\n| Editor fixture-dependent integration | %s |\n' "$EDITOR" "$EDITOR_FIXTURES"
             printf '| Build | %s |\n| Exported assets | %s |\n| Selected Next HTML tests | %s |\n' "$BUILD" "$ASSETS" "$HTML"
-            printf '\nBrowser smoke: NOT TESTED. Node Worker tests, Editor DOM mocks and source contracts do not prove real browser behavior.\n'
-            printf '\nBrowser acceptance still required: AVIF Worker/fallback; Editor load/edit/Preview/copy; cross-service state; drawer focus/Escape/backdrop; sandbox and analytics privacy.\n'
+            printf '\nChrome browser smoke step: %s. Per-scenario results are reported by tests/browser-smoke.mjs.\n' "$BROWSER"
+            printf '\nBrowser limits: fallback fault injection and real Yandex SDK post-withdrawal behavior remain NOT TESTED. Consent uses a locally fulfilled probe SDK; all external probe attempts are cancelled before sending. This is not a full visual or sandbox security audit.\n'
             printf '\nAll 11 Editor suites are mandatory. Missing publication-safe fixtures fail the integration step; no assertions are weakened and private examples must not be committed.\n'
             printf '\nExcluded: PNG-to-SVG suite and removed ZIP/code-analyzer suites. rendered-html runs only current Optimizer/Editor production HTML and AI-context tests; legacy dist/server and unrelated visual contracts remain excluded.\n'
             printf '\nNo benchmark, Pages artifact, release, deployment or source artifact is created. Runner timing is not a speed benchmark.\n'

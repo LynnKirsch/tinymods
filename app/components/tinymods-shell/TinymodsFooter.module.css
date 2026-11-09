@@ -1,0 +1,25 @@
+.surface {
+  --page-gutter: 15px;
+  --grid-gap: 8px;
+  min-width: 0;
+  font-family: var(--ui-font-family);
+  color: var(--ui-text-primary);
+}
+
+.surface:global([data-ui-theme="editor"]) { background: var(--ui-bg-app); }
+
+.surface:global([data-ui-theme="editor"]) a,
+.surface:global([data-ui-theme="editor"]) :global(.cookie-settings-button) {
+  color: var(--ui-accent-ink);
+  text-decoration-color: var(--ui-accent-border);
+}
+
+.surface :global(.release-footer) { overflow-wrap: anywhere; }
+
+@media (min-width: 480px) { .surface { --page-gutter: 30px; --grid-gap: 10px; } }
+@media (min-width: 640px) { .surface { --grid-gap: 12px; } }
+@media (min-width: 960px) { .surface { --grid-gap: 14px; } }
+@media (min-width: 1200px) { .surface { --page-gutter: 50px; --grid-gap: 16px; } }
+@media (min-width: 1440px) { .surface { --grid-gap: 18px; } }
+@media (min-width: 1920px) { .surface { --page-gutter: 90px; --grid-gap: 22px; } }
+@media (min-width: 2560px) { .surface { --page-gutter: 120px; --grid-gap: 28px; } }

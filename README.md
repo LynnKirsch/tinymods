@@ -15,7 +15,7 @@ Inputs: JPEG/JPG, PNG, HEIC/HEIF, WebP and AVIF. JPEG is input-only.
 | Screenshot | AVIF, WebP and PNG |
 | Transparent PNG | Prepared PNG and OxiPNG-optimized PNG |
 
-AVIF/WebP quality is 65, 80 (default), 85 or a custom integer 1–100. PNG does not use this quality setting. Lossless PNG encoding preserves the prepared raster; crop and resize still change its pixels and dimensions.
+AVIF/WebP quality is 65, 80, 85 (default) or a custom integer 1–100. PNG does not use this quality setting. Lossless PNG encoding preserves the prepared raster; crop and resize still change its pixels and dimensions.
 
 Processing is local and sequential, with up to 10 images, 40 MB and 50 megapixels per file. Source images are not uploaded to an Optima server. Each image keeps separate settings and finished results during the current page session. The smallest available AVIF/WebP file is initially selected for each new result; users can override that selection. Selected results download as separate files.
 
