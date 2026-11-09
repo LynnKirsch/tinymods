@@ -1,0 +1,22 @@
+<!-- Synthetic fixture: responsive slider, no customer content. -->
+<style>
+.clinic { --page-gutter: 15px; --grid-gap: clamp(12px, 1.667vw, 40px); }
+.clinic-slider__viewport { overflow:auto; margin-inline:var(--page-gutter); }
+.clinic-slider__track { display:flex; gap:var(--grid-gap); }
+@media (min-width: 1200px) { .clinic { --page-gutter: 50px; } }
+@media (min-width: 1440px) { .clinic-slider__item { flex:0 0 calc((100% - 3 * var(--grid-gap)) / 4); } }
+@media (min-width: 1920px) { .clinic { --page-gutter: 90px; } }
+@media (min-width: 2560px) { .clinic { --page-gutter: 120px; } }
+</style>
+<section class="clinic clinic-slider"><div class="clinic-slider__viewport"><div class="clinic-slider__track">
+<article class="clinic-slider__item"><h2>Sample card one</h2><p>First synthetic description.</p></article>
+<article class="clinic-slider__item"><h2>Sample card two</h2><p>Second synthetic description.</p></article>
+<article class="clinic-slider__item"><h2>Sample card three</h2><p>Third synthetic description.</p></article>
+</div></div></section>
+<style>.clinic-slider__item { min-width:0; }</style>
+<script>
+const fixtureViewport = document.querySelector('.clinic-slider__viewport');
+fixtureViewport.addEventListener('pointerdown', event => {
+ if (event.pointerType !== 'mouse') fixtureViewport.setPointerCapture(event.pointerId);
+});
+</script>

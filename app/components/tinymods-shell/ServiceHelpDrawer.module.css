@@ -1,0 +1,56 @@
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(560px, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--ui-border-soft);
+  background: var(--ui-surface-1);
+  color: var(--ui-text-primary);
+  box-shadow: var(--ui-shadow-md);
+  font: var(--ui-weight-body) 16px/var(--ui-leading-body) var(--ui-font-family);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  animation: drawer-in var(--ui-motion-slow) var(--ui-ease) both;
+}
+
+.drawer[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.drawer::backdrop { background: color-mix(in srgb, var(--ui-text-primary) 32%, transparent); animation: backdrop-in var(--ui-motion-normal) var(--ui-ease) both; }
+.closing { animation: drawer-out 180ms var(--ui-ease) both; }
+.closing::backdrop { animation: backdrop-out 180ms var(--ui-ease) both; }
+.header { padding: var(--ui-space-24); border-bottom: 1px solid var(--ui-border-soft); background: var(--ui-gradient-soft); }
+.drawer:global([data-ui-theme="editor"]) .header { background: var(--ui-accent-soft); }
+.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ui-space-16); }
+.heading > div { min-width: 0; }
+.eyebrow { margin: 0 0 var(--ui-space-8); color: var(--ui-text-secondary); font-size: 12px; }
+.heading h2 { margin: 0; font-size: clamp(22px, 2vw, 28px); font-weight: var(--ui-weight-heading); line-height: var(--ui-leading-tight); }
+.close { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); background: var(--ui-surface-1); color: var(--ui-text-secondary); cursor: pointer; }
+.close svg { width: 20px; height: 20px; pointer-events: none; }
+.close:hover { background: var(--ui-surface-hover); color: var(--ui-text-primary); }
+.drawer :is(button, a, summary):focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 2px; }
+.body { min-width: 0; min-height: 0; padding: var(--ui-space-24); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ui-border-strong) transparent; }
+.body > :first-child { margin-top: 0; }
+.body h3 { margin: var(--ui-space-24) 0 var(--ui-space-12); font-size: 19px; font-weight: var(--ui-weight-heading); line-height: var(--ui-leading-tight); }
+.body h4 { font-size: 16px; font-weight: var(--ui-weight-heading); }
+.body p { margin: 0 0 var(--ui-space-16); }
+.body strong { font-weight: var(--ui-weight-heading); }
+.body :is(ul, ol) { padding-left: var(--ui-space-24); }
+.body li + li { margin-top: var(--ui-space-8); }
+.body details { padding: var(--ui-space-16) 0; border-bottom: 1px solid var(--ui-border-soft); }
+.body summary { cursor: pointer; font-weight: var(--ui-weight-control); color: var(--ui-accent-ink); }
+.body details p { margin: var(--ui-space-12) 0 0; }
+@keyframes drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes drawer-out { to { transform: translateX(100%); } }
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-out { to { opacity: 0; } }
+@media (max-width: 639px) {
+  .header, .body { padding: var(--ui-space-20) var(--ui-space-16); }
+  .drawer { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .drawer::backdrop { animation: none; }
+}

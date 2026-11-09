@@ -1,62 +1,48 @@
-# Tinymods — Image Optimizer
+# Optima — Image Optimizer & HTML Content Editor
 
-**Tinymods** is a browser-based image optimization tool for websites.
+Optima provides two free browser tools without registration.
 
-It helps prepare images for the web: compress files, generate modern formats, create Retina versions, resize and crop images, and generate ready-to-use `<picture>` markup.
+- **[Image Optimizer](https://tinymods.ru/)** prepares website images: crop, resize without upscaling, encode and download.
+- **[HTML Content Editor](https://tinymods.ru/html-content-editor)** edits content in existing HTML blocks with a live Preview.
 
-🌐 **Website:** https://tinymods.ru
+## Image Optimizer
 
----
+Inputs: JPEG/JPG, PNG, HEIC/HEIF, WebP and AVIF. JPEG is input-only.
 
-## What Tinymods does
+| Mode | Outputs |
+| --- | --- |
+| Photo | AVIF and WebP |
+| Screenshot | AVIF, WebP and PNG |
+| Transparent PNG | Prepared PNG and OxiPNG-optimized PNG |
 
-- Converts images to WebP and AVIF
-- Supports JPEG, PNG, WebP, AVIF, HEIC and HEIF
-- Processes images directly in the browser
-- Creates standard and Retina versions
-- Resizes and crops images
-- Supports batch image processing
-- Provides a separate workflow for screenshots
-- Generates ready-to-use `<picture>` / `srcset` markup
-- Allows downloading individual files or the complete result
+AVIF/WebP quality is 65, 80 (default), 85 or a custom integer 1–100. PNG does not use this quality setting. Lossless PNG encoding preserves the prepared raster; crop and resize still change its pixels and dimensions.
 
-The core image processing happens locally in the user's browser.
+Processing is local and sequential, with up to 10 images, 40 MB and 50 megapixels per file. Source images are not uploaded to an Optima server. Each image keeps separate settings and finished results during the current page session. The smallest available AVIF/WebP file is initially selected for each new result; users can override that selection. Selected results download as separate files.
 
-Uploaded images do not need to be sent to a Tinymods server for optimization.
+## HTML Content Editor
 
----
+Paste and load block code, add blocks or fragments, and supply shared Site CSS/JS. Edit detected text, links, image URLs, ALT, video URLs and posters; inspect the combined Preview and video gallery, then copy the edited block code.
 
-## Why Tinymods
+There is no project save/reopen UI. Copy your result before leaving the page. Preview executes user scripts in an isolated iframe and may fetch external resources. Use trusted code; browser-side editing does not guarantee that user HTML makes no network requests.
 
-Tinymods was created to make one repetitive web-development task faster:
+## Stack
 
-> prepare correctly sized, lightweight images for a website without switching between multiple tools.
-
-Instead of separately resizing, converting, creating Retina versions and writing responsive image markup, Tinymods combines these steps into one workflow.
-
----
-
-## Tech stack
-
-- Next.js
-- React
-- TypeScript
-- WebAssembly
-- `@jsquash/avif`
-- `heic2any`
-- static site generation
-
-Tinymods currently does not require a backend for image optimization.
-
----
+Next.js, React, TypeScript and browser WebAssembly. Active codecs include @jsquash/avif, @jsquash/oxipng and @discourse/heic. The site uses static export; image optimization needs no application backend.
 
 ## Local development
 
-Requirements:
+Requires Node.js 22.13.0 or later and npm. Existing commands:
 
-- Node.js 22+
+- npm ci — install locked dependencies.
+- npm run dev — local development server.
+- npm run build — production static export.
+- npm run lint — ESLint.
+- npm test — build, then test suites.
 
-Install dependencies:
+These commands are documentation, not confirmation that they have been run. Some legacy suites have separate fixture/build assumptions; see the current verification workflow for the release checks.
 
-```bash
-npm install
+## Product and privacy
+
+[Product description](docs/PRODUCT.md), [privacy policy](https://tinymods.ru/privacy), [concise AI context](https://tinymods.ru/llms.txt) and [full AI context](https://tinymods.ru/llms-full.txt).
+
+Analytics starts only after consent. Cookie settings can be changed on the privacy page. The tools do not provide accounts, cloud project storage or a public API.

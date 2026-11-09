@@ -1,0 +1,275 @@
+name: Verify Optima tools (no deployment)
+
+# The existing Pages workflow handles main pushes and manual deployment only.
+# A push to this separate namespace starts verification without publishing.
+on:
+  push:
+    branches:
+      - 'ci/optima-verify-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optima-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ci/optima-verify-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure package cache outside the checkout
+        # runner context is not available in jobs.<job_id>.env. Set this before
+        # setup-node, which queries npm's configured cache path.
+        run: printf 'NPM_CONFIG_CACHE=%s/optima-verify-npm-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        id: install
+        timeout-minutes: 10
+        run: npm ci
+
+      # Separate steps remain sequential. Independent checks still report their
+      # own failures after another check fails; no failure is marked successful.
+      - name: Generate Next types and check TypeScript
+        id: types
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          node node_modules/next/dist/bin/next typegen
+          node node_modules/typescript/bin/tsc --noEmit --incremental false
+
+      - name: Check AVIF speed and Worker/fallback options
+        id: avif_options
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import ts from 'typescript';
+
+          for (const [file, quality] of [
+            ['app/lib/avif-worker.ts', 'request.quality'],
+            ['app/lib/avif-worker-client.ts', 'quality'],
+          ]) {
+            const text = await readFile(file, 'utf8');
+            const ast = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+            const options = [];
+            function visit(node) {
+              if (ts.isObjectLiteralExpression(node)) {
+                const properties = Object.fromEntries(node.properties
+                  .filter(ts.isPropertyAssignment)
+                  .map(p => [p.name.getText(ast), p.initializer.getText(ast)]));
+                if ('speed' in properties) options.push({ node, properties });
+              }
+              ts.forEachChild(node, visit);
+            }
+            visit(ast);
+            assert.equal(options.length, 1, `${file}: one encoder option object`);
+            // The fallback uses the shorthand property "quality".
+            const { node, properties } = options[0];
+            for (const p of node.properties) {
+              if (ts.isShorthandPropertyAssignment(p)) properties[p.name.text] = p.name.text;
+            }
+            assert.equal(node.properties.length, 4, `${file}: unchanged option set`);
+            assert.deepEqual(properties, { quality, speed: '8', subsample: '1', tune: '2' });
+            console.log(`${file}: dynamic quality, speed 8, subsample 1, tune 2`);
+          }
+          NODE
+
+      - name: AVIF Worker and controlled fallback tests
+        id: avif
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 5
+        run: node --experimental-strip-types --test --test-concurrency=1 tests/avif-worker-client.test.mjs
+
+      - name: Image Optimizer tests
+        id: images
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 8
+        run: node --experimental-strip-types --test --test-concurrency=1 tests/image-output.test.mjs
+
+      - name: HTML Content Editor core and repository tests
+        id: editor
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 8
+        run: >-
+          node --experimental-strip-types --test --test-concurrency=1
+          tests/html-content-editor-foundation.test.mjs
+          tests/html-content-editor-projects.test.mjs
+          tests/html-content-editor-slider-groups.test.mjs
+          tests/html-content-editor-preview-source.test.mjs
+          tests/html-content-editor-preview-mobile-menu-navigation.test.mjs
+          tests/html-content-editor-preview-typography.test.mjs
+
+      - name: HTML Content Editor fixture-dependent integration tests
+        id: editor_fixtures
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 8
+        # These existing suites require publication-safe fixtures. Never upload
+        # private local examples or fabricate a passing skip when they are absent.
+        run: |
+          node --input-type=module <<'NODE'
+          import { stat } from 'node:fs/promises';
+          const missing = [];
+          for (const file of ['tests/fixtures/html-content-editor/responsive-slider.html', 'tests/fixtures/html-content-editor/video-stories.html', 'tests/fixtures/html-content-editor/accordion-layouts.html']) {
+            try {
+              if (!(await stat(file)).isFile()) missing.push(file);
+            } catch (error) {
+              if (error.code !== 'ENOENT') throw error;
+              missing.push(file);
+            }
+          }
+          if (missing.length) {
+            console.error(`Required Editor fixtures missing: ${missing.join(', ')}`);
+            throw new Error('Editor integration coverage is blocked. Prepare reviewed, publication-safe fixtures separately; do not commit private user examples.');
+          }
+          NODE
+          node --experimental-strip-types --test --test-concurrency=1 \
+            tests/html-content-editor-block-assembly.test.mjs \
+            tests/html-content-editor-content-groups.test.mjs \
+            tests/html-content-editor-accordion-groups.test.mjs \
+            tests/html-content-editor-preview-bridge.test.mjs \
+            tests/html-content-editor-video-groups.test.mjs
+
+      - name: Shared navigation and help tests
+        id: help
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node --experimental-strip-types --test --test-concurrency=1 tests/tinymods-services.test.mjs
+
+      - name: Build current Next.js static export
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 15
+        run: npm run build 2>&1 | tee "$RUNNER_TEMP/optima-verify-build.log"
+
+      - name: Verify exported pages, Worker chunk and codec binaries
+        id: assets
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { existsSync } from 'node:fs';
+          import { readFile, readdir, stat } from 'node:fs/promises';
+          import { join, basename } from 'node:path';
+
+          async function walk(dir) {
+            const files = [];
+            for (const entry of await readdir(dir, { withFileTypes: true })) {
+              const file = join(dir, entry.name);
+              if (entry.isDirectory()) files.push(...await walk(file));
+              else files.push(file);
+            }
+            return files;
+          }
+          for (const file of [
+            'index.html', 'privacy/index.html', 'html-content-editor/index.html',
+            'robots.txt', 'sitemap.xml', 'manifest.webmanifest',
+            'favicon.svg', 'og.png', 'llms.txt', 'llms-full.txt',
+          ]) {
+            assert.ok((await stat(join('out', file))).size > 0, file);
+          }
+          for (const route of ['png-to-svg', 'svg-curve-editor', 'frontend-composer', 'tools/png-to-svg']) {
+            assert.equal(existsSync(join('out', route)), false, `excluded route: /${route}`);
+            assert.equal(existsSync(join('out', `${route}.html`)), false, `excluded route: /${route}.html`);
+          }
+
+          const editorHtml = await readFile(join('out', 'html-content-editor/index.html'), 'utf8');
+          const canonicalTags = editorHtml.match(/<link\b[^>]*rel="canonical"[^>]*>/g) ?? [];
+          assert.equal(canonicalTags.length, 1, 'Editor has exactly one canonical');
+          assert.match(canonicalTags[0], /href="https:\/\/tinymods\.ru\/html-content-editor\/?"/);
+          console.log('Editor canonical: https://tinymods.ru/html-content-editor');
+
+          const files = await walk('out/_next/static');
+          const workers = files.filter(file => /^optima-avif[.-].+\.js$/.test(basename(file)));
+          assert.ok(workers.length > 0, 'exported AVIF Worker chunk');
+          for (const file of workers) {
+            const source = await readFile(file, 'utf8');
+            assert.match(source, /onmessageerror/);
+            assert.match(source, /postMessage/);
+            assert.match(source, /speed:\s*8\b/);
+            console.log(`Worker: ${file}`);
+          }
+
+          const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+          const exported = new Map();
+          for (const file of files.filter(file => file.endsWith('.wasm'))) {
+            const bytes = await readFile(file);
+            assert.equal(bytes.subarray(0, 8).toString('hex'), '0061736d01000000', file);
+            exported.set(digest(bytes), file);
+          }
+          for (const installed of [
+            'node_modules/@jsquash/avif/codec/enc/avif_enc.wasm',
+            'node_modules/@jsquash/avif/codec/enc/avif_enc_mt.wasm',
+            'node_modules/@discourse/heic/codec/dec/heic_dec.wasm',
+            'node_modules/@jsquash/oxipng/codec/pkg/squoosh_oxipng_bg.wasm',
+            'node_modules/@jsquash/oxipng/codec/pkg-parallel/squoosh_oxipng_bg.wasm',
+          ]) {
+            const file = exported.get(digest(await readFile(installed)));
+            assert.ok(file, `exported binary matches installed codec: ${installed}`);
+            console.log(`WASM: ${file}`);
+          }
+          console.log('Static export checks passed; nothing uploaded or deployed.');
+          NODE
+
+      - name: Current Next HTML and public product context tests
+        id: html
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          node --experimental-strip-types --test --test-concurrency=1
+          --test-name-pattern='^(current Next production HTML contains the approved hero, navigation and product content|current HTML editor production page renders code loader without Project controls|publishes concise and extended AI-readable product context)$'
+          tests/rendered-html.test.mjs
+
+      - name: Report outcomes and browser coverage limit
+        if: always()
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          TYPES: ${{ steps.types.outcome }}
+          OPTIONS: ${{ steps.avif_options.outcome }}
+          AVIF: ${{ steps.avif.outcome }}
+          IMAGES: ${{ steps.images.outcome }}
+          EDITOR: ${{ steps.editor.outcome }}
+          EDITOR_FIXTURES: ${{ steps.editor_fixtures.outcome }}
+          HELP: ${{ steps.help.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          ASSETS: ${{ steps.assets.outcome }}
+          HTML: ${{ steps.html.outcome }}
+        run: |
+          {
+            printf '## Optima two-service verification (no deployment)\n\n'
+            printf '| Check | Outcome |\n|---|---|\n'
+            printf '| Install | %s |\n| Types | %s |\n| AVIF options | %s |\n' "$INSTALL" "$TYPES" "$OPTIONS"
+            printf '| AVIF Node/WASM tests | %s |\n| Image Optimizer | %s |\n| Navigation/help | %s |\n' "$AVIF" "$IMAGES" "$HELP"
+            printf '| Editor core/repository | %s |\n| Editor fixture-dependent integration | %s |\n' "$EDITOR" "$EDITOR_FIXTURES"
+            printf '| Build | %s |\n| Exported assets | %s |\n| Selected Next HTML tests | %s |\n' "$BUILD" "$ASSETS" "$HTML"
+            printf '\nBrowser smoke: NOT TESTED. Node Worker tests, Editor DOM mocks and source contracts do not prove real browser behavior.\n'
+            printf '\nBrowser acceptance still required: AVIF Worker/fallback; Editor load/edit/Preview/copy; cross-service state; drawer focus/Escape/backdrop; sandbox and analytics privacy.\n'
+            printf '\nAll 11 Editor suites are mandatory. Missing publication-safe fixtures fail the integration step; no assertions are weakened and private examples must not be committed.\n'
+            printf '\nExcluded: PNG-to-SVG suite and removed ZIP/code-analyzer suites. rendered-html runs only current Optimizer/Editor production HTML and AI-context tests; legacy dist/server and unrelated visual contracts remain excluded.\n'
+            printf '\nNo benchmark, Pages artifact, release, deployment or source artifact is created. Runner timing is not a speed benchmark.\n'
+            if [[ -f "$RUNNER_TEMP/optima-verify-build.log" ]]; then
+              printf '\n### Build warning excerpts (full details in build log)\n\n```text\n'
+              node --input-type=module -e 'import { readFile } from "node:fs/promises"; const log = await readFile(process.env.RUNNER_TEMP + "/optima-verify-build.log", "utf8"); console.log(log.split(/\r?\n/).filter(line => /warning|critical dependency/i.test(line)).slice(0, 30).join("\n"));'
+              printf '\n```\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

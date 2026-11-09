@@ -1,0 +1,191 @@
+.shell {
+  isolation: isolate;
+  min-width: 0;
+}
+
+.transitionRoot {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  overflow-x: clip;
+  background: var(--ui-gradient-app);
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-family);
+}
+
+.transitionRoot:global([data-ui-theme="editor"]) {
+  background: var(--ui-bg-app);
+}
+
+.tabs {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  min-width: 0;
+  padding: 0 15px;
+  background: transparent;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-space-16);
+}
+
+.tabScroller {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-space-6);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 10px;
+  margin-bottom: -10px;
+  scrollbar-width: thin;
+}
+
+.tab {
+  position: relative;
+  min-height: 48px;
+  padding: 0 var(--ui-space-16) var(--ui-space-2);
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--ui-space-8);
+  border: 1px solid var(--ui-border);
+  border-radius: 0 0 var(--ui-radius-md) var(--ui-radius-md);
+  background: var(--ui-surface-1);
+  color: var(--ui-text-secondary);
+  font: var(--ui-weight-control) var(--ui-font-12)/var(--ui-leading-control) var(--ui-font-family);
+  text-decoration: none;
+  transition:
+    border-color var(--ui-motion-normal) var(--ui-ease),
+    background-color var(--ui-motion-normal) var(--ui-ease),
+    color var(--ui-motion-normal) var(--ui-ease);
+}
+
+.tab:hover {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-hover);
+  color: var(--ui-text-primary);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--ui-focus-ring);
+  outline-offset: 2px;
+}
+
+.activeTab {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-gradient-soft);
+  color: var(--ui-accent-ink);
+  font-weight: var(--ui-weight-heading);
+}
+
+.activeTab:hover {
+  border-color: var(--ui-accent-hover);
+  background: var(--ui-gradient-soft);
+}
+
+.transitionRoot:global([data-ui-theme="editor"]) .activeTab,
+.transitionRoot:global([data-ui-theme="editor"]) .activeTab:hover {
+  background: var(--ui-accent-soft);
+}
+
+.tabAccent {
+  width: var(--ui-space-8);
+  height: var(--ui-space-8);
+  flex: 0 0 auto;
+  border-radius: var(--ui-radius-round);
+  background: var(--ui-accent);
+}
+
+.shortTitle {
+  display: none;
+}
+
+.helpActions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--ui-space-8); padding-top: var(--ui-space-6); }
+.helpActions button, .helpPanelTabs button { min-height: var(--ui-button-h); padding: var(--ui-space-8) var(--ui-space-12); border: 1px solid transparent; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-text-secondary); font: var(--ui-weight-control) var(--ui-font-12)/var(--ui-leading-control) var(--ui-font-family); cursor: pointer; }
+.helpActions button:hover, .helpPanelTabs button:hover { background: var(--ui-surface-hover); color: var(--ui-text-primary); }
+.helpActions button:focus-visible, .helpPanelTabs button:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 2px; }
+.helpPanelTabs { display: flex; flex-wrap: wrap; gap: var(--ui-space-8); margin-top: var(--ui-space-16); }
+.helpPanelTabs button[aria-pressed="true"] { border-color: var(--ui-accent-border); background: var(--ui-surface-1); color: var(--ui-accent-ink); }
+
+@media (max-width: 959px) {
+  .tabs { flex-direction: column; gap: var(--ui-space-4); }
+  .tabScroller { width: 100%; }
+  .helpActions { align-self: flex-end; padding-top: 0; }
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.pageStack {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: grid;
+  overflow-x: clip;
+}
+
+.pageLayer {
+  grid-area: 1 / 1;
+  min-width: 0;
+  contain: paint;
+  will-change: transform;
+}
+
+.pageLayerEntering {
+  height: 100dvh;
+  overflow: clip;
+}
+
+@media (min-width: 480px) {
+  .tabs {
+    padding-inline: 30px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .tabs {
+    padding-inline: 50px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .tabs {
+    padding-inline: 90px;
+  }
+}
+
+@media (min-width: 2560px) {
+  .tabs {
+    padding-inline: 120px;
+  }
+}
+
+@media (max-width: 479px) {
+  .tab {
+    min-height: 43px;
+    padding-inline: 13px;
+  }
+
+  .fullTitle {
+    display: none;
+  }
+
+  .shortTitle {
+    display: inline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+
+  .pageLayer {
+    will-change: auto;
+  }
+}

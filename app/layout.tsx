@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { Onest } from "next/font/google";
 import "./globals.css";
+
+const onest = Onest({
+  subsets: ["latin", "cyrillic"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+  variable: "--font-onest",
+});
 
 const SITE_URL = "https://tinymods.ru";
 const SEO_TITLE = "Умный оптимизатор изображений для сайта — Optima";
@@ -76,7 +84,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ru">
+    <html lang="ru" className={onest.variable}>
       <body>
         {children}
       </body>
