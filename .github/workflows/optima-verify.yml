@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - 'ci/optima-verify-*'
+      - 'release/optimizer-scope-ux'
 
 permissions:
   contents: read
@@ -16,7 +17,7 @@ concurrency:
 
 jobs:
   verify:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ci/optima-verify-')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/ci/optima-verify-') || github.ref == 'refs/heads/release/optimizer-scope-ux')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
