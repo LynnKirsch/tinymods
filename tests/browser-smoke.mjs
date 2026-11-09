@@ -642,6 +642,150 @@ async function imageScenario(page) {
     dedicatedWorkerTargets: page.workerTargets.length };
 }
 
+async function batchScenario(page) {
+  await page.navigate('/');
+  await page.wait(() => Boolean(document.querySelector('.dropzone')), 'batch upload UI');
+  await page.clickText('Только необходимые', 'document.querySelector(".cookie-consent")');
+  const fixtures = await page.fn(() => [[1000, 900], [1120, 780], [960, 720]].map(([width, height], index) => {
+    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, ['#135b4a', '#874a24', '#314e8a'][index]);
+    gradient.addColorStop(1, '#f5d9a3');
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(width / 5, height / 4, width / 3, height / 2);
+    return canvas.toDataURL('image/jpeg', .9).split(',')[1];
+  }));
+  const paths = [];
+  for (const [index, base64] of fixtures.entries()) {
+    const bytes = Buffer.from(base64, 'base64');
+    assert.equal(bytes.subarray(0, 3).toString('hex'), 'ffd8ff');
+    const path = join(temporary, `batch-synthetic-${index + 1}.jpg`);
+    await writeFile(path, bytes); paths.push(path);
+  }
+  step('batch: upload three synthetic JPEGs');
+  const { root } = await page.send('DOM.getDocument');
+  const { nodeId } = await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[type="file"]' });
+  assert.ok(nodeId); await page.send('DOM.setFileInputFiles', { nodeId, files: paths });
+  await page.wait(() => document.querySelectorAll('.batch-card-main').length === 3, 'three batch items');
+  const scope = label => page.clickText(label, 'document.querySelector(".processing-scope")');
+  const photo = async index => {
+    await page.clickExpression(`document.querySelectorAll('.batch-card-main')[${index}]`);
+    await page.wait(() => Boolean(document.querySelector('.batch-card-main[aria-pressed="true"]')), 'active photo');
+    assert.equal(await page.fn(() => Array.from(document.querySelectorAll('.batch-card-main')).findIndex(el => el.getAttribute('aria-pressed') === 'true')), index);
+  };
+  const ratio = label => page.clickExpression(`Array.from(document.querySelectorAll('.crop-ratios button')).find(el => el.querySelector('strong')?.textContent === ${JSON.stringify(label)})`);
+  const state = () => page.fn(() => ({
+    active: Array.from(document.querySelectorAll('.batch-card-main')).findIndex(el => el.getAttribute('aria-pressed') === 'true'),
+    scope: Array.from(document.querySelectorAll('.processing-scope button')).find(el => el.getAttribute('aria-pressed') === 'true')?.textContent.trim(),
+    quality: document.querySelector('[data-quality-tier][aria-pressed="true"]')?.getAttribute('data-quality-tier'),
+    profile: document.querySelector('input[name="profile"]:checked')?.value,
+    ctas: Array.from(document.querySelectorAll('.batch-action-grid button')).map(el => el.textContent.trim()),
+  }));
+  const initial = await state();
+  assert.equal(initial.active, 0); assert.equal(initial.scope, 'По отдельности'); assert.equal(initial.quality, 'q85');
+  assert.equal(await page.fn(() => document.querySelector('.crop-setting-group legend')?.textContent), 'Сначала подготовьте кадр');
+  assert.equal(await page.fn(() => Array.from(document.querySelectorAll('legend')).some(el => el.textContent.trim() === 'Пропорции кадров')), false);
+  step('batch: individual settings stay on photo 2');
+  await photo(1); await ratio('4:3'); await page.clickText('Сохранить кадр', 'document.querySelector(".crop-save-row")');
+  await page.fill('input[aria-label="Нужная ширина файла в пикселях"]', '600');
+  await page.click('[data-quality-tier="q65"]');
+  let current = await state();
+  assert.equal(current.quality, 'q65'); assert.equal(current.profile, 'custom');
+  assert.equal(current.ctas.length, 1); assert.match(current.ctas[0], /Оптимизировать фото 2/i);
+  await photo(0); current = await state();
+  assert.equal(current.quality, 'q85'); assert.equal(current.profile, initial.profile);
+  assert.equal(await page.fn(() => document.querySelector('.crop-ratios button[aria-pressed="true"] strong')?.textContent), 'Исходное');
+  await photo(1); assert.equal((await state()).quality, 'q65');
+  step('batch: one square crop and common size');
+  await scope('Для всей очереди'); current = await state();
+  assert.equal(current.scope, 'Для всей очереди'); assert.equal(current.quality, 'q85');
+  assert.equal(current.ctas.length, 1); assert.match(current.ctas[0], /Оптимизировать всю очередь\s*3 фото/i);
+  await ratio('1:1');
+  assert.equal(await page.fn(() => Array.from(document.querySelectorAll('.crop-ratios button')).find(el => el.querySelector('strong')?.textContent === '1:1')?.getAttribute('aria-pressed')), 'true');
+  const cropWidths = [];
+  for (let index = 0; index < 3; index++) {
+    await photo(index);
+    const crop = await page.fn(() => ({
+      saved: document.querySelector('.crop-save-row button')?.disabled,
+      width: Number(document.querySelector('input[aria-label="Ширина области кадрирования в пикселях оригинала"]')?.value),
+      height: Number(document.querySelector('input[aria-label="Высота области кадрирования в пикселях оригинала"]')?.value),
+    }));
+    assert.equal(crop.saved, true); assert.ok(crop.width > 0 && crop.height > 0);
+    assert.ok(Math.abs(crop.width - crop.height) <= 1, 'saved crop is square');
+    cropWidths.push(Math.round(crop.width));
+  }
+  const limitText = await page.fn(() => document.querySelector('.profile-availability strong')?.textContent);
+  assert.equal(Number(limitText?.match(/—\s*(\d+)\s*px/)?.[1]), Math.min(...cropWidths));
+  const preset = await page.fn(limit => Array.from(document.querySelectorAll('.profile-card')).map(card => ({
+    value: card.querySelector('input[name="profile"]')?.value,
+    widths: (card.querySelector('.profile-title-row strong')?.textContent.match(/\d+/g) ?? []).map(Number),
+  })).find(item => item.widths.length === 2 && Math.max(...item.widths) <= limit), Math.min(...cropWidths));
+  assert.ok(preset && preset.widths.length === 2, 'available paired profile');
+  await page.clickExpression(`document.querySelector('input[name="profile"][value="${preset.value}"]').closest('label')`);
+  await page.click('[data-quality-tier="q80"]');
+  assert.equal((await state()).quality, 'q80');
+  current = await state(); assert.equal(current.ctas.length, 1); assert.match(current.ctas[0], /Оптимизировать всю очередь\s*3 фото/i);
+  step('batch: one click processes the entire queue');
+  await page.click('.batch-optimize-all');
+  await page.wait(() => {
+    const error = document.querySelector('.error-message'); if (error?.textContent) throw Error('Batch error: ' + error.textContent);
+    return document.querySelectorAll('.batch-strip > .is-complete').length === 3 && !document.querySelector('.progress-panel');
+  }, 'all three batch results', 90_000);
+  assert.equal(await page.fn(() => document.querySelectorAll('.batch-action-grid button').length), 0, 'all current hides CTA');
+  const sent = await page.fn(() => window.__optimaSmokeWorkers.flatMap(worker => worker.sent).filter(message => message.kind === 'encode'));
+  assert.equal(sent.length, 6); assert.ok(sent.every(job => job.quality === 80));
+  assert.deepEqual(sent.map(job => job.width).sort((a, b) => a - b), [...preset.widths, ...preset.widths, ...preset.widths].sort((a, b) => a - b));
+  step('batch: paired results and smallest format for each target');
+  const targetWidths = async () => (await page.fn(() => Array.from(document.querySelectorAll('.preview-size-bar button')).map(el => Number(el.textContent.match(/\d+/)?.[0])))).sort((a, b) => a - b);
+  const expectedWidths = [...preset.widths].sort((a, b) => a - b);
+  for (let index = 0; index < 3; index++) {
+    await photo(index);
+    await page.wait(() => document.querySelectorAll('.preview-size-bar button').length === 2, 'paired result sizes');
+    assert.deepEqual(await targetWidths(), expectedWidths, `photo ${index + 1} retains both targets`);
+    assert.equal(await page.fn(() => document.querySelector('.result-quality')?.textContent), 'Q80');
+  }
+  const target = async index => {
+    await page.clickExpression(`document.querySelectorAll('.preview-size-bar button')[${index}]`);
+    assert.deepEqual(await targetWidths(), expectedWidths, 'target switch preserves the pair');
+  };
+  const selection = () => page.fn(() => Array.from(document.querySelectorAll('.format-result-row')).map(row => ({
+    format: row.querySelector('span strong')?.textContent, checked: row.querySelector('input')?.checked,
+  })));
+  const checkSmallest = async () => {
+    const auto = await selection();
+    assert.equal(auto.filter(row => row.checked).length, 1);
+    const sizes = {};
+    for (const format of ['AVIF', 'WEBP']) {
+      const row = `Array.from(document.querySelectorAll('.format-result-row')).find(row => row.querySelector('span strong')?.textContent === '${format}')`;
+      await page.clickExpression(row);
+      await page.clickExpression(row);
+      sizes[format] = await page.fn(async () => (await (await fetch(document.querySelector('.compare img').src)).blob()).size);
+    }
+    assert.ok(sizes[auto.find(row => row.checked).format] <= Math.min(sizes.AVIF, sizes.WEBP), 'automatic choice has smallest actual Blob');
+  };
+  await target(0); await checkSmallest(); await target(1); await checkSmallest(); await target(0); await checkSmallest();
+  await target(1); await target(0);
+  const beforeManual = await selection();
+  const other = beforeManual.find(row => !row.checked).format;
+  await page.clickExpression(`Array.from(document.querySelectorAll('.format-result-row')).find(row => row.querySelector('span strong')?.textContent === '${other}')`);
+  assert.equal((await selection()).find(row => row.format === other).checked, true, 'manual override persists on target');
+  await target(1); await target(0); await checkSmallest();
+  step('batch: scope switch alone and stale result');
+  await photo(1); await scope('По отдельности');
+  await page.clickExpression(`document.querySelector('input[name="profile"][value="${preset.value}"]').closest('label')`);
+  await page.click('[data-quality-tier="q80"]');
+  const afterIndividual = await state();
+  assert.equal(afterIndividual.ctas.length, 0, 'matching individual settings are current');
+  await scope('Для всей очереди'); assert.equal((await state()).ctas.length, 0, 'scope switch does not stale batch');
+  await scope('По отдельности'); assert.deepEqual((await state()).ctas, afterIndividual.ctas, 'scope switch does not stale individual');
+  await page.click('[data-quality-tier="q85"]');
+  current = await state(); assert.equal(current.ctas.length, 1); assert.match(current.ctas[0], /Оптимизировать фото 2/i);
+  assert.deepEqual(await targetWidths(), expectedWidths, 'committed result survives changed settings');
+  page.healthy();
+  return { images: 3, cropWidths, commonLimit: Math.min(...cropWidths), targets: expectedWidths, quality: 80, workerRequests: sent.length };
+}
+
 async function editorScenario(page) {
   await page.navigate('/html-content-editor/');
   await page.wait(() => Boolean(document.querySelector('#block-1-fragment-1')), 'Editor code input');
@@ -883,6 +1027,7 @@ async function main() {
   try {
     await startServer(); await startChrome();
     await runCase('Image Optimizer: JPEG/Q65/AVIF/Worker/download', imageScenario, { workers: true });
+    await runCase('Image Optimizer: individual and batch scope', batchScenario, { workers: true });
     await runCase('HTML Editor: load/edit/Preview/clipboard', editorScenario);
     await runCase('Shell navigation and help', shellScenario);
     await runCase('Consent UI with intercepted local probe SDK', consentScenario, { analytics: true });
@@ -901,7 +1046,7 @@ async function main() {
       '\nPASS applies only to the named assertions. Real Yandex SDK revocation and browser fallback are NOT TESTED. No screenshots, HTML or downloads are uploaded.\n'];
     await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
   }
-  assert.ok(results.filter(r => r.status === 'PASS').length === 4 && !results.some(r => r.status === 'FAIL'),
+  assert.ok(results.filter(r => r.status === 'PASS').length === 5 && !results.some(r => r.status === 'FAIL'),
     'Mandatory browser smoke scenarios did not all pass');
 }
 
