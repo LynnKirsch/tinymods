@@ -46,7 +46,7 @@ export type EditableEntityContext =
     }
   | {
       type: "css-url";
-      property: "background-image";
+      property: "background-image" | `--${string}`;
       quote: '"' | "'" | "";
       container: "style-attribute" | "style-block";
       attributeQuote?: '"' | "'";

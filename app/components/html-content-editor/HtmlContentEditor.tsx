@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   type CSSProperties,
@@ -19,6 +19,7 @@ import {
 import { extractEditableEntitiesWithVideoStories } from "../../lib/html-content-editor/extract-editable-entities";
 import {
   groupImageEntities,
+  imageRoleLabel,
   linkedVideoEntities,
   isVideoEntity,
   videoPosterEntity,
@@ -31,6 +32,7 @@ import {
   byteSizeFromDataUrl,
   imageFormatFromSource,
   imageMetadataLine,
+  imageOrientation,
   type ImageMetadata,
 } from "../../lib/html-content-editor/image-metadata";
 import { validateRequiredImageValues } from "../../lib/html-content-editor/image-validation";
@@ -93,73 +95,14 @@ function fieldLabel(entity: EditableEntity) {
 }
 
 function canPreviewImage(value: string) {
-  return /^(https?:\/\/|data:image\/|\/|\.\/|\.\.\/)/i.test(value.trim());
-}
-
-function imageMetadataKey(value: string) {
-  return value.trim();
-}
-
-function loadIntrinsicImageSize(source: string) {
-  return new Promise<{ width?: number; height?: number }>((resolve) => {
-    if (!canPreviewImage(source) || typeof Image === "undefined") {
-      resolve({});
-      return;
-    }
-
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => resolve({});
-    image.src = source;
-  });
-}
-
-async function loadImageResourceMetadata(source: string) {
-  if (/^data:image\//i.test(source)) {
-    return {
-      bytes: byteSizeFromDataUrl(source),
-      mimeType: source.match(/^data:([^;,]+)/i)?.[1] ?? "",
-    };
-  }
-  if (typeof fetch === "undefined") return {};
-
+  if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(value)) return true;
+  if (!value || /^[#?]/.test(value) || /[\\\u0000-\u001f]/.test(value)) return false;
   try {
-    const response = await fetch(source, { method: "HEAD" });
-    const mimeType = response.headers.get("content-type") ?? "";
-    const length = response.headers.get("content-length");
-    if (!length) return { mimeType };
-    const bytes = Number.parseInt(length, 10);
-    return {
-      bytes: Number.isFinite(bytes) ? bytes : undefined,
-      mimeType,
-    };
+    const url = new URL(value, "https://example.invalid/");
+    return url.protocol === "https:" || url.protocol === "http:";
   } catch {
-    try {
-      const response = await fetch(source);
-      const blob = await response.blob();
-      return {
-        bytes: blob.size,
-        mimeType: blob.type || response.headers.get("content-type") || "",
-      };
-    } catch {
-      return {};
-    }
+    return false;
   }
-}
-
-async function loadImageMetadata(source: string): Promise<ImageMetadata> {
-  const [size, resource] = await Promise.all([
-    loadIntrinsicImageSize(source),
-    loadImageResourceMetadata(source),
-  ]);
-
-  return {
-    status: "ready",
-    format: imageFormatFromSource(source, resource.mimeType),
-    width: size.width,
-    height: size.height,
-    bytes: resource.bytes,
-  };
 }
 
 function imageInputId(groupId: string, index: number, kind: ImageEntityKind) {
@@ -458,16 +401,37 @@ function VideoModal({ entry, trigger, onClose }: { entry: VideoPreviewEntry; tri
   </div>, document.body);
 }
 
-function IntrinsicImagePreview({ source, metadata }: { source: string; metadata?: ImageMetadata }) {
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  return <div className={styles.imagePreviewFrame} style={intrinsicFrameStyle(size?.width ?? metadata?.width, size?.height ?? metadata?.height)}>
-    {canPreviewImage(source) ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img className={styles.imagePreview} src={source} alt="" onLoad={event => {
-        event.currentTarget.hidden = false;
-        setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
-      }} onError={event => { event.currentTarget.hidden = true; }} />
-    ) : null}
+function IntrinsicImagePreview({ source, video }: { source: string; video: boolean }) {
+  const [metadata, setMetadata] = useState<ImageMetadata>();
+  const allowed = canPreviewImage(source);
+  const unavailable = !allowed || metadata?.status === "unavailable";
+  const caption = unavailable
+    ? video ? "Предпросмотр недоступен" : source ? "Предпросмотр недоступен · Размер неизвестен" : "URL не указан"
+    : [imageMetadataLine(source, metadata), metadata?.status === "ready" ? imageOrientation(metadata.width, metadata.height) : ""]
+      .filter(Boolean).join(" · ");
+
+  return <div className={styles.mediaThumbnail}
+    data-media-preview={unavailable ? "unavailable" : metadata?.status ?? "loading"}>
+    <div className={styles.imagePreviewFrame} style={intrinsicFrameStyle(metadata?.width, metadata?.height)}>
+      {!unavailable ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className={styles.imagePreview} src={source} loading="lazy" decoding="async"
+          referrerPolicy="no-referrer" alt="" onLoad={event => {
+            const image = event.currentTarget;
+            const timing = performance.getEntriesByName(image.currentSrc).findLast(
+              (entry): entry is PerformanceResourceTiming => entry.entryType === "resource" && "decodedBodySize" in entry,
+            );
+            setMetadata({
+              status: "ready",
+              format: imageFormatFromSource(source),
+              width: event.currentTarget.naturalWidth,
+              height: event.currentTarget.naturalHeight,
+              bytes: /^data:image\//i.test(source) ? byteSizeFromDataUrl(source) : timing?.decodedBodySize || undefined,
+            });
+          }} onError={() => setMetadata({ status: "unavailable", format: imageFormatFromSource(source) })} />
+      ) : <span aria-hidden="true" className={styles.mediaPlaceholder}>{video ? "▶" : "▧"}</span>}
+    </div>
+    <p className={styles.imageMetadata}>{caption}</p>
   </div>;
 }
 
@@ -486,8 +450,6 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [openSlideById, setOpenSlideById] = useState<Record<string, boolean>>({});
   const [activeSlideBySliderId, setActiveSlideBySliderId] = useState<Record<string, number>>({});
-  const [imageMetadataByUrl, setImageMetadataByUrl] = useState<Record<string, ImageMetadata>>({});
-  const imageMetadataCacheRef = useRef(new Map<string, ImageMetadata | Promise<ImageMetadata>>());
   const contentGroupRefs = useRef<Record<string, HTMLElement | null>>({});
   const previewAccordionControllerRef = useRef<{ openForEntity: (id: string) => void } | null>(null);
   useEffect(() => {
@@ -594,18 +556,6 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
     [extraction.entities, extraction.videoStoryByImageEntityId, imageGroups],
   );
   const videoStoryEntityByEntityId = videoStories.storyEntityByEntityId;
-  const imageUrls = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          extraction.entities
-            .filter(usesImageMetadata)
-            .map((entity) => imageMetadataKey(values[entity.id] ?? displayValue(entity)))
-            .filter(Boolean),
-        ),
-      ),
-    [extraction.entities, values],
-  );
   const blockingValidationIssues = useMemo(
     () => validateRequiredImageValues(extraction.entities, values),
     [extraction.entities, values],
@@ -625,21 +575,6 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
       copyTimer.current = setTimeout(() => setCopyFeedback(""), 1800);
     } catch { setCopyFeedback("Не удалось скопировать код."); }
   }
-  useEffect(() => {
-    let cancelled = false;
-    for (const url of imageUrls) {
-      let request = imageMetadataCacheRef.current.get(url);
-      if (!request) {
-        request = loadImageMetadata(url);
-        imageMetadataCacheRef.current.set(url, request);
-      }
-      Promise.resolve(request).then(metadata => {
-        imageMetadataCacheRef.current.set(url, metadata);
-        if (!cancelled) setImageMetadataByUrl(current => ({ ...current, [url]: metadata }));
-      });
-    }
-    return () => { cancelled = true; };
-  }, [imageUrls]);
   function updateValue(entity: EditableEntity, value: string) {
     setCopyFeedback("");
     const key = editorEntityKey(block.id, entity.id);
@@ -701,32 +636,6 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
     return values[entity.id] ?? displayValue(entity);
   }
 
-  function imageMetadataPrefix(entity: EditableEntity) {
-    if (entity.kind === "poster" || (entity.context.type === "attribute" && entity.context.mediaRole === "video-poster")) {
-      return "Постер к видео";
-    }
-    if (entity.context.type === "attribute" && entity.context.mediaRole === "video") {
-      return "Видео";
-    }
-    if (entity.context.type === "attribute" && entity.context.fallback) {
-      return "Основное изображение";
-    }
-    if (entity.context.type === "css-url") {
-      return "Фоновое изображение";
-    }
-    return "";
-  }
-
-  function imageMetadataText(entity: EditableEntity) {
-    if (!usesImageMetadata(entity)) {
-      return imageMetadataPrefix(entity) || "Медиа";
-    }
-    const url = imageMetadataKey(valueFor(entity));
-    const metadata = imageMetadataLine(url, imageMetadataByUrl[url]);
-    const prefix = imageMetadataPrefix(entity);
-    return prefix ? `${prefix} · ${metadata}` : metadata;
-  }
-
   function renderImageUrlControl(
     entity: EditableEntity,
     inputId: string,
@@ -735,11 +644,14 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
     inputId = block.id + "-" + inputId;
     const issue = blockingValidationIssueByEntityId.get(entity.id);
     const descriptionId = issue ? `${inputId}-description` : undefined;
-    const metadataText = options.metadataText ?? (entity.context.type === "attribute" && entity.context.mediaRole === "video"
-      ? "Ссылка на видео" : imageMetadataText(entity));
+    const video = isVideoEntity(entity);
+    const poster = video ? videoPosterEntity(extraction.entities, entity) : undefined;
+    const previewSource = (video ? poster && valueFor(poster) : valueFor(entity))?.trim() ?? "";
+    const metadataText = options.metadataText ?? (video ? "Ссылка на видео" : imageRoleLabel(entity));
 
     return (
       <div className={`${styles.imageUrlControl} ${issue ? styles.fieldWarning : ""}`} ref={node => { contentGroupRefs.current[`entity:${entity.id}`] = node; }}>
+        {usesImageMetadata(entity) || video ? <IntrinsicImagePreview key={previewSource} source={previewSource} video={video} /> : null}
         <div className={styles.mediaFieldHeader}>
           <label htmlFor={inputId}>
             <span className={styles.imageMetadata} aria-live="polite">
@@ -797,16 +709,8 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
   function renderImageGroupContent(group: ImageGroup, inputPrefix: string, options: { storyField?: boolean } = {}) {
     const items = group.items.filter(item => linkedVideoEntities(extraction.entities, item.entity)[0]?.id === item.entity.id);
     if (!items.length && !group.altEntity) return null;
-    const previewEntity =
-      group.items.find((item) => usesImageMetadata(item.entity))?.entity ??
-      group.items.at(-1)?.entity ??
-      group.items[0]?.entity;
-
     return (
-      <div className={`${styles.imageGroupItems} ${previewEntity && isVideoEntity(previewEntity) ? styles.videoUrlFields : ""}`}>
-        {previewEntity && usesImageMetadata(previewEntity) ? <IntrinsicImagePreview
-          key={valueFor(previewEntity)} source={valueFor(previewEntity)} metadata={imageMetadataByUrl[imageMetadataKey(valueFor(previewEntity))]}
-        /> : null}
+      <div className={styles.imageGroupItems}>
         <div className={styles.imageFields}>
           {items.map((item, index) => {
             const inputId = imageInputId(`${inputPrefix}-${group.id}`, index, item.entity.kind);
@@ -816,7 +720,7 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
 
             return (
               <div className={styles.imageField} key={item.entity.id}>
-                {item.label && !options.storyField ? <p className={styles.imageMetadata}>{item.label}</p> : null}
+                {isVideoVariant && !options.storyField ? <p className={styles.imageMetadata}>{item.label}</p> : null}
                 {item.detail ? <p className={styles.imageMetadata}>{item.detail}</p> : null}
                 {renderImageUrlControl(item.entity, inputId, {
                   metadataText: isVideoVariant ? "Ссылка на видео" : options.storyField ? group.title : undefined,
@@ -1165,7 +1069,7 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
               В этом коде пока не найден поддерживаемый для редактирования контент.
             </p>
           ) : (
-            <div className={styles.fields} data-content-scroll style={{ maxHeight: "calc(100dvh - 180px)", overflowY: "auto" }}>
+            <div className={styles.fields} data-content-scroll>
               {accordionContentItems.length > 0 ? (
                 <section className={styles.sliderGroup}>
                   <div className={styles.sliderGroupHeader}>
@@ -1225,8 +1129,7 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
                             return (
                               <div className={styles.repeatingField} key={entity.id}>
                                 {isImageEntity(entity) ? (
-                                  <div className={`${styles.repeatingUrlField} ${isVideoEntity(entity) ? styles.videoUrlFields : ""}`}>
-                                    {usesImageMetadata(entity) ? <IntrinsicImagePreview key={valueFor(entity)} source={valueFor(entity)} metadata={imageMetadataByUrl[imageMetadataKey(valueFor(entity))]} /> : null}
+                                  <div className={styles.repeatingUrlField}>
                                     {renderImageUrlControl(entity, inputId)}
                                   </div>
                                 ) : (
@@ -1390,7 +1293,7 @@ export default function HtmlContentEditor() {
       <section className={styles.hero}>
         <h1>HTML Content Editor</h1>
         <p>Редактируйте тексты, ссылки и изображения прямо в браузере.</p>
-        <p className={styles.localNote}>Загружайте блоки в том порядке, в котором они расположены на странице. Общие стили и скрипты страницы или сайта загружайте отдельно.</p>
+        <p className={styles.localNote}>Загружайте блоки в том порядке, в котором они расположены на странице. Общие стили и скрипты страницы или сайта загружайте отдельно. Внешние миниатюры загружаются с адресов, указанных в коде.</p>
       </section>
       <section className={styles.codeLoaderGrid} aria-label="Загрузка кода">
         <div className={styles.blockStack}>

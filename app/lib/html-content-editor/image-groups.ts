@@ -103,15 +103,23 @@ function viewportMediaLabel(value?: string) {
   return `Условие: ${value.replace(/[()]/g, "").trim()}`;
 }
 
-function imageItemLabel(entity: EditableEntity & { kind: ImageEntityKind }) {
-  if (entity.context.type === "css-url") return "Фоновое изображение";
+export function imageRoleLabel(entity: EditableEntity) {
+  if (entity.context.type === "css-url") {
+    if (/-preview-desktop$/i.test(entity.context.property)) return "Облегчённое изображение desktop";
+    if (/-preview-mobile$/i.test(entity.context.property)) return "Облегчённое изображение mobile";
+    return "Фоновое изображение";
+  }
   if (entity.kind === "poster" || (entity.context.type === "attribute" && entity.context.mediaRole === "video-poster")) return "Постер к видео";
   if (entity.context.type === "attribute" && entity.context.mediaRole === "video") {
     return viewportMediaLabel(entity.context.media);
   }
   if (entity.context.type === "attribute" && entity.context.fallback) return "Основное изображение";
   if (entity.context.type === "srcset-url") {
-    return imageFormatLabel(entity.context.sourceType) || "Вариант изображения";
+    const format = imageFormatLabel(entity.context.sourceType);
+    if (entity.context.pictureId && /(?:max-width\s*:|width\s*<=)/i.test(entity.context.media ?? "")) {
+      return format ? "Мобильное изображение · " + format : "Мобильное изображение";
+    }
+    return format || "Вариант изображения";
   }
   return "Изображение";
 }
@@ -126,7 +134,9 @@ function imageItemDetail(entity: EditableEntity & { kind: ImageEntityKind }) {
       .join(" · ");
   }
   if (entity.context.type === "css-url") {
-    return entity.context.container === "style-block" ? "CSS background-image" : "inline background-image";
+    return entity.context.property === "background-image"
+      ? entity.context.container === "style-block" ? "CSS background-image" : "inline background-image"
+      : entity.context.property;
   }
   if (entity.context.type === "attribute" && entity.context.mediaRole === "video") {
     return "video src";
@@ -216,7 +226,7 @@ export function groupImageEntities(entities: EditableEntity[]) {
     if (entity.context.type === "attribute" && (entity.context.name === "data-video" || entity.kind === "poster") && group.items.length) continue;
     group.items.push({
       entity,
-      label: imageItemLabel(entity),
+      label: imageRoleLabel(entity),
       detail: imageItemDetail(entity),
     });
     groups.set(groupId, group);

@@ -298,7 +298,9 @@ function scanSrcsetAttribute(
   imageContext: ImageTagContext,
 ) {
   const range = firstAttributeValue(tag, tagStart, "srcset");
-  if (!range || !isSrcsetElementName(imageContext.elementName)) return;
+  const explicitlyTypedImage = imageContext.mediaRole === undefined && /^image\//i.test(imageContext.sourceType ?? "");
+  if (!range || !isSrcsetElementName(imageContext.elementName) ||
+    (imageContext.mediaRole !== "image" && !explicitlyTypedImage)) return;
   const mediaRole =
     imageContext.mediaRole === "video" || imageContext.mediaRole === "image" || imageContext.mediaRole === "video-poster"
       ? imageContext.mediaRole
@@ -428,22 +430,28 @@ function scanBackgroundImageUrls(
   start: number,
   end: number,
   entities: EditableEntity[],
-  context: Omit<Extract<EditableEntityContext, { type: "css-url" }>, "quote">,
+  context: Omit<Extract<EditableEntityContext, { type: "css-url" }>, "quote" | "property">,
 ) {
-  const content = source.slice(start, end);
+  const content = source.slice(start, end).replace(
+    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\*[\s\S]*?\*\//g,
+    (token) => token.startsWith("/*") ? " ".repeat(token.length) : token,
+  );
   const pattern =
-    /background-image\s*:\s*url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s][^)]*?))\s*\)/gi;
+    /(?:^|(?<=[;{]))\s*(background-image|--[\w-]+)\s*:\s*url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s][^)]*?))\s*\)/gi;
 
   for (const match of content.matchAll(pattern)) {
-    const quotedValue = match[1] ?? match[2];
-    const quote = match[1] !== undefined ? '"' : match[2] !== undefined ? "'" : "";
-    const rawCandidate = quotedValue ?? match[3];
+    const property = match[1].startsWith("--") ? match[1] : "background-image";
+    // Custom properties can also store script, font and other URLs.
+    if (property !== "background-image" && !/-(?:preview|image|photo|poster|background|bg|cover|thumbnail)(?:-|$)/i.test(property)) continue;
+    const quotedValue = match[2] ?? match[3];
+    const quote = match[2] !== undefined ? '"' : match[3] !== undefined ? "'" : "";
+    const rawCandidate = quotedValue ?? match[4];
     if (rawCandidate === undefined) continue;
 
     const trimmedCandidate = quote ? rawCandidate : rawCandidate.trimEnd();
     if (!trimmedCandidate.trim()) continue;
 
-    const valueOffset = match[0].indexOf(rawCandidate);
+    const valueOffset = match[0].lastIndexOf(rawCandidate);
     const rangeStart = start + (match.index ?? 0) + valueOffset;
     pushEntity(
       entities,
@@ -453,6 +461,7 @@ function scanBackgroundImageUrls(
       rangeStart + trimmedCandidate.length,
       {
         ...context,
+        property: property as Extract<EditableEntityContext, { type: "css-url" }>["property"],
         quote,
       },
     );
@@ -501,6 +510,8 @@ function scanEditableAttributes(
   linkRole?: LinkRole,
 ) {
   for (const [attributeName, kind] of Object.entries(EDITABLE_ATTRIBUTES)) {
+    if (kind === "src" && (!imageContext.elementName || !imageContext.mediaRole)) continue;
+    if (kind === "href" && !["a", "area"].includes(readTagName(tag) ?? "")) continue;
     for (const range of attributeValueRanges(tag, tagStart, attributeName)) {
       const context: Extract<EditableEntityContext, { type: "attribute" }> = {
         type: "attribute",
@@ -551,7 +562,6 @@ function scanEditableAttributes(
   if (style) {
     scanBackgroundImageUrls(source, style.start, style.end, entities, {
       type: "css-url",
-      property: "background-image",
       container: "style-attribute",
       attributeQuote: style.quote,
     });
@@ -627,7 +637,6 @@ function extractHtmlEditableEntities(source: string) {
           entities,
           {
             type: "css-url",
-            property: "background-image",
             container: "style-block",
           },
         );
@@ -689,7 +698,7 @@ function extractHtmlEditableEntities(source: string) {
         : videoGroupId,
       mediaRole: name === "img" || (name === "source" && pictureId)
         ? "image"
-        : name === "video" || parentVideoId ? "video" : undefined,
+        : name === "video" || (name === "source" && parentVideoId) ? "video" : undefined,
       fallback: elementName === "img" ? Boolean(pictureId) : undefined,
       media: firstAttributeValue(tag, tagStart, "media")?.rawValue,
       sourceType: firstAttributeValue(tag, tagStart, "type")?.rawValue,

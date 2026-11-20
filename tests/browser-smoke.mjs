@@ -340,7 +340,7 @@ class Page {
       const { executionContextId } = await protocol.send('Page.createIsolatedWorld', {
         frameId: owner.frameId, worldName: 'optima-smoke-read-only',
       }, candidate.sessionId);
-      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })',
+      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, typography:document.querySelector("#smoke-typography")?.textContent, dynamicText:document.querySelector("#smoke-dynamic")?.textContent, preformatted:document.querySelector("#smoke-pre")?.textContent, imageUrl:document.querySelector("#smoke-block picture img")?.currentSrc, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })',
         executionContextId, candidate.sessionId);
       const current = await this.previewOwner();
       if (!candidate.attached || current?.backendNodeId !== owner.backendNodeId || current?.frameId !== owner.frameId) {
@@ -797,12 +797,24 @@ async function editorScenario(page) {
   const fixture = await readFile('tests/fixtures/html-content-editor/responsive-slider.html', 'utf8');
   const article = fixture.match(/<article\b[\s\S]*?<\/article>/)?.[0];
   assert.ok(article?.includes('<h2>Sample card one</h2>'), 'Existing synthetic fixture structure');
-  const pixel = await page.fn(() => {
-    const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
-    return canvas.toDataURL('image/png');
+  const [portrait, landscape, square] = await page.fn(() => {
+    const canvas = document.createElement('canvas');
+    return [[3, 5], [5, 3], [4, 4]].map(([width, height]) => {
+      canvas.width = width;
+      canvas.height = height;
+      return canvas.toDataURL('image/png');
+    });
   });
+  const broken = 'data:image/png;base64,AAAA';
+  const video = 'data:video/mp4;base64,AAAA';
   const source = '<!-- smoke-preserve -->\n<section id="smoke-block">' + article +
-    '<a href="/privacy/">Smoke link</a><img alt="Smoke pixel" src="' + pixel + '"></section>';
+    '<a href="/privacy/">Smoke link</a><p id="smoke-typography">В <em>лесу</em></p>' +
+    '<p id="smoke-dynamic">Ожидание</p><pre id="smoke-pre">На берегу</pre>' +
+    '<picture><source media="(max-width: 640px)" srcset="/favicon.svg"><img alt="Smoke portrait" src="' + portrait + '"></picture>' +
+    '<div style="--sample-preview-desktop:url(/favicon.svg); background-image:url(' + landscape + ')"></div>' +
+    '<img alt="Smoke broken image" src="' + broken + '"><video src="' + video + '" poster="' + square + '"></video>' +
+    '<video><source src="/favicon.ico" type="video/mp4"></video></section>' +
+    '<script>window.addEventListener("load",()=>setTimeout(()=>{document.querySelector("#smoke-dynamic").firstChild.data="Дом с камином";},50),{once:true});</script>';
   step('load existing synthetic HTML fixture through UI');
   await page.fill('#block-1-fragment-1', source);
   await page.clickText('Загрузить код', 'document.querySelector("section[aria-label=\\"Загрузка кода\\"]")');
@@ -810,12 +822,41 @@ async function editorScenario(page) {
   const headingSelector = 'input[aria-label="Заголовок"]';
   await page.fill(headingSelector, 'Smoke updated heading');
   step('verify edited text inside real sandboxed Preview');
-  await until(async () => (await page.frameHeading())?.heading === 'Smoke updated heading', 'Preview shows edited heading');
+  await until(async () => {
+    const frame = await page.frameHeading();
+    return frame?.heading === 'Smoke updated heading' && frame.typography === 'В\u00a0лесу' &&
+      frame.dynamicText === 'Дом с\u00a0камином' && frame.preformatted === 'На берегу';
+  }, 'Preview applies initial, inline and dynamic typography without touching PRE');
+  for (const expected of ['Вертикальное', 'Горизонтальное', 'Квадратное', 'Предпросмотр недоступен · Размер неизвестен']) {
+    await until(async () => await page.fn((label) => {
+      const thumbs = Array.from(document.querySelectorAll('[data-content-scroll] [data-media-preview]'));
+      for (const thumb of thumbs) {
+        if (thumb.dataset.mediaPreview === 'loading') {
+          thumb.scrollIntoView({ block: 'nearest' });
+          break;
+        }
+      }
+      return thumbs.some(thumb => thumb.textContent.includes(label));
+    }, expected), 'Content thumbnail ' + expected);
+  }
+  assert.equal(await page.fn(() => Array.from(document.querySelectorAll('[data-content-scroll] [data-media-preview]'))
+    .some(thumb => thumb.textContent.includes('Предпросмотр недоступен') &&
+      thumb.querySelector('[aria-hidden="true"]')?.textContent === '▶' && !thumb.querySelector('video,iframe,img'))), true,
+  'Video without a poster has a placeholder');
+  assert.equal(await page.fn((source, poster) => Array.from(document.querySelectorAll('[data-content-scroll] input'))
+    .filter(input => input.value === source).some(input =>
+      input.parentElement.querySelector('[data-media-preview] img')?.getAttribute('src') === poster), video, square), true,
+  'Content shows the video poster as an image');
+  assert.equal(await page.fn(() => {
+    const content = document.querySelector('[data-content-scroll]');
+    return getComputedStyle(content).overflowY === 'auto' && parseFloat(getComputedStyle(content).maxHeight) >= innerHeight - 132;
+  }), true, 'Content uses the viewport while retaining inner scrolling');
   for (const width of [390, 1440]) {
     await page.clickExpression('Array.from(document.querySelectorAll("[aria-label=\\"Размер предпросмотра\\"] button")).find(el => el.querySelector("small")?.textContent === ' + JSON.stringify(String(width)) + ')');
     await until(async () => {
       const preview = await page.frameHeading();
-      return preview?.width === width && preview.heading === 'Smoke updated heading' && !preview.overflow;
+      const correctImage = width === 390 ? preview?.imageUrl?.endsWith('/favicon.svg') : preview?.imageUrl === portrait;
+      return preview?.width === width && preview.heading === 'Smoke updated heading' && !preview.overflow && correctImage;
     }, 'Preview width ' + width + ' without horizontal overflow');
     assert.equal(await page.fn(() => document.documentElement.scrollWidth <= innerWidth + 2), true, 'Editor page has no horizontal overflow');
   }
@@ -834,6 +875,12 @@ async function editorScenario(page) {
   await checkHelp(page, { selector: headingSelector, value: 'Smoke updated heading' });
   const canonical = await page.fn(() => document.querySelector('link[rel="canonical"]')?.href);
   assert.match(canonical, /^https:\/\/tinymods\.ru\/html-content-editor\/?$/);
+  await page.clickText('Загрузить другой код');
+  await page.fill('#block-1-fragment-1', '<section id="smoke-block"><h2>В новом блоке</h2></section>');
+  await page.clickText('Загрузить код', 'document.querySelector("section[aria-label=\\"Загрузка кода\\"]")');
+  await until(async () => (await page.frameHeading())?.heading === 'В\u00a0новом блоке', 'Replacement Preview applies typography');
+  assert.equal(await page.fn(() => document.querySelector('[data-content-scroll] [data-media-preview]')), null,
+    'Replacement clears old media thumbnails');
   page.healthy();
   return { previewWidths: [390, 1440], clipboardCharacters: copied.length, canonical };
 }

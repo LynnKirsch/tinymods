@@ -64,6 +64,12 @@ export function formatByteSize(bytes?: number) {
   return `${(bytes! / 1024 / 1024).toFixed(bytes! < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
+export function imageOrientation(width?: number, height?: number) {
+  if (!width || !height || width < 1 || height < 1) return "Размер неизвестен";
+  if (width === height) return "Квадратное";
+  return width > height ? "Горизонтальное" : "Вертикальное";
+}
+
 export function imageMetadataLine(source: string, metadata?: ImageMetadata) {
   if (!source.trim()) return "URL не указан";
   if (!metadata || metadata.status === "loading") {

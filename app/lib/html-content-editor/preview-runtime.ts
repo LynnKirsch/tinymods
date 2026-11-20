@@ -7,6 +7,7 @@ import { buildPreviewSource } from "./preview-source";
 import { createLiveSliderNavigation } from "./preview-slider-navigation";
 import { detectAccordionGroups, type AccordionGroup } from "./accordion-groups";
 import type { PreviewRegistry } from "./preview-bridge";
+import { createPreviewTypography } from "./preview-typography";
 
 type RuntimeBlock = {
   blockId: string;
@@ -158,7 +159,7 @@ export function buildLivePreview(blocks: BlockSource[], context: SiteContext, in
     return preview.source;
   });
   const json = JSON.stringify({ instanceId, blocks: runtimeBlocks }).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
-  const runtime = `<script data-tinymods-runtime>(${installPreviewMouseDragGuard.toString()})();document.addEventListener("DOMContentLoaded",()=>{const config=${json};(${installPreviewRuntime.toString()})(config.instanceId,config.blocks,${createLiveSliderNavigation.toString()});},{once:true});</script>`;
+  const runtime = `<script data-tinymods-runtime>(${installPreviewMouseDragGuard.toString()})();document.addEventListener("DOMContentLoaded",()=>{const config=${json};(${installPreviewRuntime.toString()})(config.instanceId,config.blocks,${createLiveSliderNavigation.toString()});const typography=(${createPreviewTypography.toString()})().installPreviewTypography(document,{enabled:true});window.addEventListener("pagehide",typography.cleanup,{once:true});},{once:true});</script>`;
   const css = context.css ? fragmentExecutableSource(context.css, "css") : "";
   const js = context.js ? fragmentExecutableSource(context.js, "js") : "";
   // Bootstrap registration precedes user scripts; installation waits for the complete document.

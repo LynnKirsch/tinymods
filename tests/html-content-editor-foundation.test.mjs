@@ -9,7 +9,8 @@ import {
   encodeEditableEntityValue,
 } from "../app/lib/html-content-editor/encode-source-value.ts";
 import { extractEditableEntities } from "../app/lib/html-content-editor/extract-editable-entities.ts";
-import { groupImageEntities } from "../app/lib/html-content-editor/image-groups.ts";
+import { groupImageEntities, isVideoEntity } from "../app/lib/html-content-editor/image-groups.ts";
+import { imageOrientation } from "../app/lib/html-content-editor/image-metadata.ts";
 import { validateRequiredImageValues } from "../app/lib/html-content-editor/image-validation.ts";
 import { visibleOutputSource } from "../app/lib/html-content-editor/output-code.ts";
 import { applySourcePatches } from "../app/lib/html-content-editor/patch-source.ts";
@@ -1021,13 +1022,54 @@ test("groups picture image variants while keeping source entities independent", 
       rawValue: entity.rawValue,
     })),
     [
-      { label: "AVIF", detail: "до 959 px", rawValue: "mobile.avif" },
-      { label: "WebP", detail: "до 959 px", rawValue: "mobile.webp" },
+      { label: "Мобильное изображение · AVIF", detail: "до 959 px", rawValue: "mobile.avif" },
+      { label: "Мобильное изображение · WebP", detail: "до 959 px", rawValue: "mobile.webp" },
       { label: "AVIF", detail: "", rawValue: "desktop.avif" },
       { label: "Основное изображение", detail: "", rawValue: "desktop.webp" },
     ],
   );
   assertRangeInvariant(source, entities);
+});
+
+test("extracts media by HTML role and patches only the selected responsive URL", () => {
+  const source = [
+    '<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>',
+    '<link rel="stylesheet" href="https://example.test/swiper.css">',
+    '<script src="https://example.test/swiper.js"></script>',
+    '<script>void "keep inline JS";</script>',
+    '<!-- <picture><img src="/unused"></picture> -->',
+    '<a href="/details">Details</a>',
+    '<div style="--il-preview-desktop:url(/preview-wide); --il-preview-mobile:url(/preview-narrow); --font-file:url(/font); background-image:url(/backdrop)">',
+    '<picture><source media="(max-width: 640px)" srcset="/shared 1x, /missing 2x"><img src="/shared"></picture></div>',
+    '<video src="/direct-video" poster="/cover"><source src="/video-fallback" type="video/mp4"></video>',
+    '<audio><source src="/not-an-image" srcset="/also-not-an-image"></audio>',
+  ].join("\n");
+  const entities = extractEditableEntities(source);
+  assertRangeInvariant(source, entities);
+  const media = groupImageEntities(entities).flatMap(group => group.items);
+  assert.deepEqual(media.map(item => item.entity.rawValue), [
+    "/preview-wide", "/preview-narrow", "/backdrop", "/shared", "/missing", "/shared",
+    "/direct-video", "/video-fallback", "/cover",
+  ]);
+  assert.deepEqual(entities.filter(e => e.kind === "href").map(e => e.rawValue), ["/details"]);
+  assert.deepEqual(entities.filter(isVideoEntity).map(e => e.rawValue), ["/direct-video", "/video-fallback"]);
+  assert.deepEqual(media.slice(0, 6).map(item => item.label), [
+    "Облегчённое изображение desktop", "Облегчённое изображение mobile", "Фоновое изображение",
+    "Мобильное изображение", "Мобильное изображение", "Основное изображение",
+  ]);
+  const mobile = media[3].entity;
+  assert.equal(applySourcePatches(source, [createEditableEntityPatch(mobile, "/mobile-replacement")]),
+    source.replace('srcset="/shared 1x', 'srcset="/mobile-replacement 1x'));
+  const lightweight = media[1].entity;
+  assert.equal(applySourcePatches(source, [createEditableEntityPatch(lightweight, "/preview-next")]),
+    source.replace("url(/preview-narrow)", "url(/preview-next)"));
+});
+
+test("labels orientation from measured dimensions only", () => {
+  assert.equal(imageOrientation(1000, 1500), "Вертикальное");
+  assert.equal(imageOrientation(1680, 1062), "Горизонтальное");
+  assert.equal(imageOrientation(1000, 1000), "Квадратное");
+  assert.equal(imageOrientation(1000), "Размер неизвестен");
 });
 
 test("extracts inline background-image URL only", () => {
@@ -1929,12 +1971,18 @@ test("both Content media paths use intrinsic image preview and exclude Video ima
   const source = HTML_CONTENT_EDITOR_COMPONENT_SOURCE;
   const normal = source.slice(source.indexOf("function renderImageGroupContent"), source.indexOf("function renderSliderGroup"));
   const repeating = source.slice(source.indexOf("{repeatingGroups.map"), source.indexOf("{imageGroups.map"));
-  assert.ok(normal.includes("usesImageMetadata(previewEntity)"));
-  assert.ok(repeating.includes("usesImageMetadata(entity)"));
+  const field = source.slice(source.indexOf("function renderImageUrlControl"), source.indexOf("function renderAltControl"));
+  const thumbnail = source.slice(source.indexOf("function IntrinsicImagePreview"), source.indexOf("type BlockFieldsProps"));
   for (const renderer of [normal, repeating]) {
-    assert.ok(renderer.includes("<IntrinsicImagePreview"));
-    assert.equal(renderer.includes("<img"), false);
+    assert.match(renderer, /renderImageUrlControl\(/);
+    assert.doesNotMatch(renderer, /<img\b/);
   }
+  assert.match(field, /<IntrinsicImagePreview key=\{previewSource\}/);
+  assert.match(field, /video \? poster && valueFor\(poster\) : valueFor\(entity\)/);
+  assert.match(thumbnail, /loading="lazy"/);
+  assert.match(thumbnail, /referrerPolicy="no-referrer"/);
+  assert.doesNotMatch(thumbnail, /<video\b|<iframe\b|fetch\(/);
+  assert.match(thumbnail, /Предпросмотр недоступен/);
   assert.ok(source.includes("event.currentTarget.naturalWidth"));
   assert.ok(source.includes("event.currentTarget.naturalHeight"));
   assert.ok(source.includes("aspectRatio: `${width} / ${height}`"));

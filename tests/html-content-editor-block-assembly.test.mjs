@@ -99,14 +99,15 @@ test("two and three blocks have independent entity namespaces under shared site 
   assert.notEqual(preview.runtimeBlocks[0].markers[0].previewId, preview.runtimeBlocks[1].markers[0].previewId);
 });
 
-test("live JS runs once without static widget conversion or typography transformation", () => {
+test("live JS stays intact while typography is installed only in Preview", () => {
   const source = '<div id="widget"></div><script>const root=document.querySelector("#widget"); root.innerHTML = `<p>В лесу и на берегу</p>`; window.runs=(window.runs||0)+1;</script>';
   const preview = buildLivePreview([block("a", [source])], { css: "", js: "" }, "one");
   assert.equal((preview.source.match(/window.runs=/g) ?? []).length, 1);
   assert.ok(preview.source.includes("root.innerHTML"));
   assert.ok(!preview.source.includes("\u00a0"));
   assert.ok(!preview.source.includes("tinymods-preview-content-visible"));
-  assert.ok(!preview.source.includes("installPreviewTypography"));
+  assert.match(preview.source, /installPreviewTypography\(document,\{enabled:true\}\)/);
+  assert.ok(preview.source.includes('window.runs=(window.runs||0)+1;'));
   assert.equal(exportBlock(block("a", [source])), source);
 });
 
