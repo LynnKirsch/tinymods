@@ -192,15 +192,17 @@ class Page {
   }
   async clickExpression(expression) {
     // Layout and compositor updates after device emulation are asynchronous.
-    const sample = async (scroll = false) => this.evaluate('(async () => { const el = ' + expression + `;
+    const sample = async (scroll = false, pointer = null, settle = true) => this.evaluate('(async () => { const el = ' + expression + `;
       if (!el) return { ready: false, found: false };
       if (el.disabled) throw Error('UI control disabled');
       if (${scroll}) el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
       const rect = () => { const r=el.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; };
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      if (${settle}) await new Promise(resolve => requestAnimationFrame(resolve));
       const before=rect();
-      await new Promise(resolve => requestAnimationFrame(resolve));
-      const r=rect(), x=r.x+r.width/2, y=r.y+r.height/2, hit=document.elementFromPoint(x,y);
+      if (${settle}) await new Promise(resolve => requestAnimationFrame(resolve));
+      const r=rect(), pointer=${JSON.stringify(pointer)};
+      const x=pointer?.x ?? r.x+r.width/2, y=pointer?.y ?? r.y+r.height/2;
+      const hit=x>=0 && y>=0 && x<innerWidth && y<innerHeight ? document.elementFromPoint(x,y) : null;
       const stable=Object.keys(r).every(key=>Math.abs(r[key]-before[key])<.25);
       return { found:true, ready:el.isConnected && stable && r.width>0 && r.height>0 && Boolean(hit && (hit===el || el.contains(hit))),
         x,y,rect:r,stable,hit:{tag:hit?.tagName ?? null,role:hit?.getAttribute('role') ?? null,target:hit===el,withinTarget:Boolean(hit && el.contains(hit))},
@@ -209,13 +211,26 @@ class Page {
         action:el.matches('.cookie-consent-close')?'close':el.textContent.trim()==='Только необходимые'?'necessary':el.textContent.trim()==='Разрешить аналитику'?'analytics':'other' };
     })()`);
     let last;
-    const point = await until(async () => {
-      last = await sample(true);
-      this.lastClickDiagnostics = { stage: "prepare", before: last };
-      return last.ready ? last : false;
-    }, 'click target visible, stable and hit-testable');
-    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', buttons: 0, x: point.x, y: point.y });
-    const final = await until(async () => { last=await sample(); this.lastClickDiagnostics={stage:'after hover',before:last}; return last.ready ? last : false; }, 'click hit target after hover');
+    let final;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const point = await until(async () => {
+        last = await sample(true);
+        this.lastClickDiagnostics = { stage: 'prepare', attempt, before: last };
+        return last.ready ? last : false;
+      }, 'click target visible, stable and hit-testable');
+      const pointer = { x: point.x, y: point.y };
+      await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', buttons: 0, ...pointer });
+      last = await sample(false, pointer);
+      this.lastClickDiagnostics = { stage: 'after hover', attempt, before: last };
+      if (!last.ready) continue;
+      last = await sample(false, pointer, false);
+      this.lastClickDiagnostics = { stage: 'before press', attempt, before: last };
+      if (last.ready) {
+        final = last;
+        break;
+      }
+    }
+    assert.ok(final, 'CDP click target moved away from the pointer: ' + JSON.stringify(this.lastClickDiagnostics));
     if (final.cookieControl) {
       this.lastClickDiagnostics = { before: final };
       await this.evaluate('(() => { const el = ' + expression + `;
@@ -233,6 +248,10 @@ class Page {
         window.__optimaSmokeClickAudit=()=>{observer.disconnect();for(const type of ['pointerdown','mousedown','mouseup','click'])document.removeEventListener(type,receive,true);window.removeEventListener('optima:consent-changed',changed);
           const current=document.querySelector('.cookie-consent');return {before,events,consentEvents,storedChoice:choice(),bannerPresent:Boolean(current),bannerCount:document.querySelectorAll('.cookie-consent').length,bannerRootReplaced:Boolean(current && current!==original),added,removed};};
       })()`);
+    }
+    if (final.cookieControl) {
+      const point = await sample(false, { x: final.x, y: final.y }, false);
+      assert.ok(point.ready, 'Cookie control moved before press: ' + JSON.stringify(point));
     }
     await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, x: final.x, y: final.y });
     await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, x: final.x, y: final.y });
@@ -340,7 +359,7 @@ class Page {
       const { executionContextId } = await protocol.send('Page.createIsolatedWorld', {
         frameId: owner.frameId, worldName: 'optima-smoke-read-only',
       }, candidate.sessionId);
-      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, typography:document.querySelector("#smoke-typography")?.textContent, dynamicText:document.querySelector("#smoke-dynamic")?.textContent, preformatted:document.querySelector("#smoke-pre")?.textContent, imageUrl:document.querySelector("#smoke-block picture img")?.currentSrc, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })',
+      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, typography:document.querySelector("#smoke-typography")?.textContent, dynamicText:document.querySelector("#smoke-dynamic")?.textContent, dynamicScript:document.querySelector("#smoke-dynamic")?.getAttribute("data-smoke-script"), preformatted:document.querySelector("#smoke-pre")?.textContent, imageUrl:document.querySelector("#smoke-block picture img")?.currentSrc, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })',
         executionContextId, candidate.sessionId);
       const current = await this.previewOwner();
       if (!candidate.attached || current?.backendNodeId !== owner.backendNodeId || current?.frameId !== owner.frameId) {
@@ -814,7 +833,9 @@ async function editorScenario(page) {
     '<div style="--sample-preview-desktop:url(/favicon.svg); background-image:url(' + landscape + ')"></div>' +
     '<img alt="Smoke broken image" src="' + broken + '"><video src="' + video + '" poster="' + square + '"></video>' +
     '<video><source src="/favicon.ico" type="video/mp4"></video></section>' +
-    '<script>window.addEventListener("load",()=>setTimeout(()=>{document.querySelector("#smoke-dynamic").firstChild.data="Дом с камином";},50),{once:true});</script>';
+    '<script>(()=>{const target=document.querySelector("#smoke-dynamic");target.dataset.smokeScript="registered";' +
+    'window.addEventListener("load",()=>{target.dataset.smokeScript="load";setTimeout(()=>{' +
+    'target.firstChild.data="Дом с камином";target.dataset.smokeScript="text-written";},50);},{once:true});})();</script>';
   step('load existing synthetic HTML fixture through UI');
   await page.fill('#block-1-fragment-1', source);
   await page.clickText('Загрузить код', 'document.querySelector("section[aria-label=\\"Загрузка кода\\"]")');
@@ -822,11 +843,34 @@ async function editorScenario(page) {
   const headingSelector = 'input[aria-label="Заголовок"]';
   await page.fill(headingSelector, 'Smoke updated heading');
   step('verify edited text inside real sandboxed Preview');
-  await until(async () => {
-    const frame = await page.frameHeading();
-    return frame?.heading === 'Smoke updated heading' && frame.typography === 'В\u00a0лесу' &&
-      frame.dynamicText === 'Дом с\u00a0камином' && frame.preformatted === 'На берегу';
-  }, 'Preview applies initial, inline and dynamic typography without touching PRE');
+  const previewChecks = [
+    { field: 'heading', name: 'Preview edited heading', expected: 'Smoke updated heading' },
+    { field: 'typography', name: 'Preview typography across inline boundary', expected: 'В\u00a0лесу' },
+    { field: 'dynamicText', name: 'Preview dynamic text typography', expected: 'Дом с\u00a0камином' },
+    { field: 'preformatted', name: 'Preview PRE exclusion', expected: 'На берегу' },
+  ];
+  const previewFailures = [];
+  for (const { field, name, expected } of previewChecks) {
+    let frame;
+    let iframe;
+    try {
+      await until(async () => {
+        frame = await page.frameHeading();
+        iframe = page.lastPreview;
+        return frame?.[field] === expected && (field !== 'dynamicText' || frame.dynamicScript === 'text-written');
+      }, name);
+    } catch (error) {
+      previewFailures.push({ name, error: brief(error) });
+    }
+    console.log('PREVIEW_CHECK ' + JSON.stringify({
+      name, expected, actual: frame?.[field] ?? null, exists: frame?.[field] !== undefined,
+      status: previewFailures.some(failure => failure.name === name) ? 'FAIL' : 'PASS',
+      iframe: { frameId: iframe?.owner?.frameId, readyState: frame?.readyState ?? null,
+        attached: Boolean(frame), state: iframe?.state, error: iframe?.error },
+      ...(field === 'dynamicText' ? { script: frame?.dynamicScript ?? null } : {}),
+    }));
+  }
+  assert.deepEqual(previewFailures, [], 'Preview browser checks must all pass');
   for (const expected of ['Вертикальное', 'Горизонтальное', 'Квадратное', 'Предпросмотр недоступен · Размер неизвестен']) {
     await until(async () => await page.fn((label) => {
       const thumbs = Array.from(document.querySelectorAll('[data-content-scroll] [data-media-preview]'));
