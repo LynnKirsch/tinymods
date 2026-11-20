@@ -69,13 +69,40 @@ async function encodeTrial() {
   }));
 }
 
-function analyzeMetadata(path, width, height, subsample) {
-  const fields = JSON.parse(run("ffprobe", ["-v", "error", "-select_streams", "v:0",
-    "-show_entries", "stream=width,height,pix_fmt", "-of", "json", path])).streams[0];
-  assert.ok(fields, "AVIF has no video stream");
-  assert.deepEqual([fields.width, fields.height], [width, height]);
-  assert.match(fields.pix_fmt, subsample === 1 ? /^yuvj?420p$/ : /^yuvj?444p$/);
-  return fields.pix_fmt;
+function boxes(data) {
+  const result = [];
+  for (let offset = 0; offset < data.length;) {
+    assert.ok(data.length - offset >= 8, "Truncated AVIF box header");
+    const size = data.readUInt32BE(offset) || data.length - offset;
+    assert.ok(size >= 8 && size <= data.length - offset, "Invalid AVIF box length");
+    result.push({ type: data.toString("ascii", offset + 4, offset + 8),
+      payload: data.subarray(offset + 8, offset + size) });
+    offset += size;
+  }
+  return result;
+}
+
+function requireBox(data, type) {
+  const box = boxes(data).find((item) => item.type === type);
+  assert.ok(box, "Missing AVIF box: " + type);
+  return box.payload;
+}
+
+async function analyzeMetadata(path, subsample) {
+  const data = await readFile(path);
+  const meta = requireBox(data, "meta").subarray(4); // FullBox version and flags
+  const properties = requireBox(requireBox(meta, "iprp"), "ipco");
+  // AV1-ISOBMFF section 2.3.3 defines the av1C fields. The alpha image is monochrome.
+  const color = boxes(properties).filter(({ type }) => type === "av1C").map(({ payload }) => {
+    assert.ok(payload.length >= 4 && payload[0] === 0x81, "Invalid AV1 configuration");
+    return payload[2];
+  }).filter((flags) => !(flags & 0x10));
+  assert.equal(color.length, 1, "Expected one color AV1 configuration");
+  const [flags] = color;
+  assert.equal(flags & 0x60, 0, "Expected 8-bit AVIF");
+  const subsamplingBits = (flags >> 2) & 3;
+  assert.equal(subsamplingBits, subsample === 1 ? 3 : 0, "Unexpected chroma metadata");
+  return subsamplingBits === 3 ? "yuv420p" : "yuv444p";
 }
 
 async function loadMetric() {
@@ -231,7 +258,7 @@ async function benchmark() {
       system: release(), cpu: cpus()[0].model, logicalCpuCount: cpus().length, memoryBytes: totalmem(),
       codecVersion: packageInfo.version, options: { ...defaultOptions, ...options },
       decoder: "sharp " + sharp.versions.sharp + " / libheif " + sharp.versions.heif,
-      metadataTool: run("ffprobe", ["-version"]).split("\n")[0], metric: metricInfo,
+      metadataTool: "AVIF av1C fields (AV1-ISOBMFF section 2.3.3)", metric: metricInfo,
     });
 
     const preview = [];
@@ -256,7 +283,7 @@ async function benchmark() {
               referencePath, path, width, height, quality, subsample].map(String), 60_000));
             assert.equal(trial.referenceSha256, referenceSha256);
             Object.assign(row, trial);
-            row.pixelFormat = analyzeMetadata(path, width, height, subsample);
+            row.pixelFormat = await analyzeMetadata(path, subsample);
             const { data: decoded, ...scores } = await comparePixels(path, data, width, height, fixture.alpha, metric);
             row.decoded = true;
             Object.assign(row, scores);
