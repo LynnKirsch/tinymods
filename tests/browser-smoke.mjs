@@ -835,7 +835,9 @@ async function editorScenario(page) {
     '<video><source src="/favicon.ico" type="video/mp4"></video></section>' +
     '<script>(()=>{const target=document.querySelector("#smoke-dynamic");target.dataset.smokeScript="registered";' +
     'window.addEventListener("load",()=>{target.dataset.smokeScript="load";setTimeout(()=>{' +
-    'target.firstChild.data="Дом с камином";target.dataset.smokeScript="text-written";},50);},{once:true});})();</script>';
+    'const node=Array.from(target.childNodes).find(child=>child.nodeType===Node.TEXT_NODE&&child.data==="Ожидание");' +
+    'if(!node)throw new Error("Smoke dynamic text node Ожидание not found");' +
+    'node.data="Дом с камином";target.dataset.smokeScript="text-written";},50);},{once:true});})();</script>';
   step('load existing synthetic HTML fixture through UI');
   await page.fill('#block-1-fragment-1', source);
   await page.clickText('Загрузить код', 'document.querySelector("section[aria-label=\\"Загрузка кода\\"]")');
