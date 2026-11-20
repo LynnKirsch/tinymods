@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   verify:
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/ci/optima-verify-') || github.ref == 'refs/heads/release/optimizer-scope-ux')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/ci/optima-verify-') || github.ref == 'refs/heads/release/optimizer-scope-ux') && github.ref != 'refs/heads/ci/optima-verify-avif-chroma'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
@@ -281,3 +281,62 @@ jobs:
               printf '\n```\n'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  avif_chroma:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ci/optima-verify-avif-chroma'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+        timeout-minutes: 6
+
+      - name: Prepare optional SSIMULACRA2 scorer outside the checkout
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          metric_dir="$RUNNER_TEMP/avif-metric"
+          if npm install --prefix "$metric_dir" --ignore-scripts --no-audit --no-fund --no-package-lock --save-exact bytecut-ssimulacra2@0.1.0; then
+            if entry="$(cd "$metric_dir" && node --input-type=module -e 'import { fileURLToPath } from "node:url"; console.log(fileURLToPath(import.meta.resolve("bytecut-ssimulacra2")))')"; then
+              printf 'AVIF_METRIC_ENTRY=%s\n' "$entry" >> "$GITHUB_ENV"
+            fi
+          fi
+
+      - name: Stage A — validate two small fixtures
+        id: chroma_smoke
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          node scripts/research/avif-chroma.mjs smoke "$RUNNER_TEMP/avif-smoke"
+          cat "$RUNNER_TEMP/avif-smoke/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage B — benchmark nine fixtures
+        id: chroma_full
+        if: success() && steps.chroma_smoke.outcome == 'success'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          node scripts/research/avif-chroma.mjs full "$RUNNER_TEMP/avif-full"
+          cat "$RUNNER_TEMP/avif-full/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the benchmark data and visual comparisons
+        if: ${{ !cancelled() && steps.chroma_smoke.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: optima-avif-chroma
+          path: |
+            ${{ runner.temp }}/avif-smoke/
+            ${{ runner.temp }}/avif-full/
+          if-no-files-found: warn
+          retention-days: 14
