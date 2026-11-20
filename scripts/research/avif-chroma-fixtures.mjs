@@ -98,6 +98,7 @@ export async function prepare(fixture, stage) {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height +
       '" viewBox="0 0 768 544" font-family="DejaVu Sans, sans-serif">' + graphic(fixture.id) + '</svg>';
     pipeline = sharp(Buffer.from(svg));
+    if (!fixture.alpha) pipeline = pipeline.flatten({ background: "#ffffff" });
     provenance = { source: "Deterministic SVG generator in avif-chroma-fixtures.mjs" };
   }
   const { data, info } = await pipeline.toColourspace("srgb").ensureAlpha().raw().toBuffer({ resolveWithObject: true });

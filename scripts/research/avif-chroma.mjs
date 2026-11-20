@@ -229,6 +229,15 @@ async function report(dir, meta, rows, errors) {
         decimal(median(batch.map((pair) => pair.peakDeltaKiB)))].join(" | ") + " |");
     }
   }
+  const successful = rows.filter((row) => row.success);
+  if (successful.length) {
+    lines.push("", "Median WASM loading: " + decimal(median(successful.map((row) => row.loadMs))) +
+      " ms. Median WASM initialization: " + decimal(median(successful.map((row) => row.initMs))) + " ms.");
+    for (const row of successful.filter((result) => result.group === "alpha")) {
+      lines.push("- Alpha " + row.chroma + " Q" + row.quality + ": mean absolute alpha error " +
+        decimal(row.alphaMae) + " / 255.");
+    }
+  }
   lines.push("", "Successful cases: " + rows.filter((row) => row.success).length + ". Errors: " + errors.length + ".");
   for (const error of errors) lines.push("- " + error.replaceAll("\n", " "));
   await writeFile(join(dir, "summary.md"), lines.join("\n") + "\n");
@@ -252,13 +261,13 @@ async function benchmark() {
     assert.equal(packageInfo.version, "2.1.1");
     const { defaultOptions } = await import("@jsquash/avif/meta.js");
     const metric = await loadMetric();
-    const { score: _score, ...metricInfo } = metric;
+    const { name, implementation, source, tolerance } = metric;
     Object.assign(meta, {
       commit: process.env.GITHUB_SHA, runnerImage: process.env.ImageVersion, node: process.version,
       system: release(), cpu: cpus()[0].model, logicalCpuCount: cpus().length, memoryBytes: totalmem(),
       codecVersion: packageInfo.version, options: { ...defaultOptions, ...options },
       decoder: "sharp " + sharp.versions.sharp + " / libheif " + sharp.versions.heif,
-      metadataTool: "AVIF av1C fields (AV1-ISOBMFF section 2.3.3)", metric: metricInfo,
+      metadataTool: "AVIF av1C fields (AV1-ISOBMFF section 2.3.3)", metric: { name, implementation, source, tolerance },
     });
 
     const preview = [];
