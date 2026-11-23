@@ -451,11 +451,30 @@
 }
 .codeIconButton:active { background: var(--ui-surface-pressed); color: var(--ui-text-primary); }
 .codeIconButton:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 3px; }
-.contentActions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-.contentActions .primaryButton { white-space: normal; }
-.contentActions button:not(.primaryButton) { background: var(--ui-surface-1); color: var(--ui-accent); }
-.contentActions button:not(.primaryButton):hover { background: var(--ui-accent-soft); }
-.copyFeedback { font-size: 12px; flex-basis: 100%; }
+.previewCodeActions {
+  display: grid;
+  border-top: 1px solid var(--ui-border);
+  background: var(--ui-surface-1);
+}
+
+.contentActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.contentActions + .contentActions { border-top: 1px solid var(--ui-border-soft); }
+.contentActions strong { margin-inline-end: auto; font-size: var(--ui-font-14); }
+.contentActions button {
+  min-height: var(--code-action-height, 44px);
+  max-width: 100%;
+  white-space: normal;
+}
+.copyFeedback { font-size: var(--ui-font-13); flex-basis: 100%; }
+.copyFeedback:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; }
 .codeIconButton.lockButtonActive { border-color: var(--ui-accent-border); background: var(--ui-accent-soft); color: var(--ui-accent);
   box-shadow: inset 0 0 0 1px var(--ui-accent-border);
 }

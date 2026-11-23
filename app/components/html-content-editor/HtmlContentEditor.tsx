@@ -542,14 +542,20 @@ function IntrinsicImagePreview({ source, video }: { source: string; video: boole
 
 type BlockFieldsProps = {
   block: BlockSource; index: number;
+  codeActionsTarget: HTMLDivElement | null;
   selected: { blockId: string; entityId: string; revision: number } | null;
   onSelectVideo: (blockId: string, entityId: string) => void;
   onChange: (block: BlockSource) => void; send: (command: PreviewCommand) => void;
 };
-function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: BlockFieldsProps) {
-  const [copyFeedback, setCopyFeedback] = useState("");
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
+function BlockFields({ block, index, codeActionsTarget, selected, onChange, send, onSelectVideo }: BlockFieldsProps) {
+  const [copyFeedback, setCopyFeedback] = useState<{ block: BlockSource; message: string } | null>(null);
+  const copyRequest = useRef(0);
+  const copyMessage = copyFeedback?.block === block ? copyFeedback.message : "";
+  useEffect(() => {
+    if (copyMessage !== "СКОПИРОВАНО") return;
+    const timer = setTimeout(() => setCopyFeedback(null), 1800);
+    return () => clearTimeout(timer);
+  }, [copyFeedback, copyMessage]);
   const source = assembleBlock(block).source;
   const values = useMemo(() => Object.fromEntries(Object.entries(block.values).map(([key,value]) => [key.slice(block.id.length+2),value])), [block.id, block.values]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
@@ -673,15 +679,17 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
   const hasInvalidContent = blockHasInvalidContent(block);
   async function copyBlockCode() {
     if (!hasChanges || hasInvalidContent || blockingValidationIssues.length) return;
+    const request = ++copyRequest.current;
+    setCopyFeedback(null);
+    let message = "СКОПИРОВАНО";
     try {
       await navigator.clipboard.writeText(exportBlock(block));
-      setCopyFeedback("СКОПИРОВАНО");
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopyFeedback(""), 1800);
-    } catch { setCopyFeedback("Не удалось скопировать код."); }
+    } catch {
+      message = "Не удалось скопировать код.";
+    }
+    if (request === copyRequest.current) setCopyFeedback({ block, message });
   }
   function updateValue(entity: EditableEntity, value: string) {
-    setCopyFeedback("");
     const key = editorEntityKey(block.id, entity.id);
     const nextValues = { ...block.values };
     for (const linked of linkedVideoEntities(extraction.entities, entity)) {
@@ -693,7 +701,7 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
     } else delete nextValues[`${key}::valid`];
     onChange({ ...block, values: nextValues });
   }
-  function resetChanges() { setCopyFeedback(""); onChange({ ...block, fragments: block.fragments.map(fragment => ({ ...fragment, source: fragment.originalSource, draft: fragment.originalSource })), values: {} }); }
+  function resetChanges() { copyRequest.current++; setCopyFeedback(null); onChange({ ...block, fragments: block.fragments.map(fragment => ({ ...fragment, source: fragment.originalSource, draft: fragment.originalSource })), values: {} }); }
   function focusEntity(entityId: string) { const entityIndex = extraction.entities.findIndex(entity => entity.id === entityId); if (entityIndex >= 0) send({ type: "highlight", markerIds: ["block-" + (index+1) + "-tm-" + (entityIndex+1)] }); }
   function scrollContentGroupIntoView(groupId: string, field?: HTMLElement | null) {
     requestAnimationFrame(() => {
@@ -1153,14 +1161,20 @@ function BlockFields({ block, index, selected, onChange, send, onSelectVideo }: 
               <small>БЛОК {index + 1} · Содержимое</small>
               <strong>{hasSource ? `${contentEntities.length} полей` : "Пока пусто"}</strong>
             </span>
-            <div className={styles.contentActions}>
-            {hasChanges ? <button type="button" className={styles.primaryButton} disabled={hasInvalidContent || blockingValidationIssues.length > 0} onClick={copyBlockCode}>{copyFeedback === "СКОПИРОВАНО" ? copyFeedback : "СКОПИРОВАТЬ КОД БЛОКА"}</button> : null}
-            <button type="button" onClick={resetChanges} disabled={!hasChanges && !hasInvalidContent}>
-              Сбросить
-            </button>
-            {copyFeedback ? <span role="status" className={styles.copyFeedback}>{copyFeedback}</span> : null}
-            </div>
           </div>
+          {codeActionsTarget ? createPortal(
+            <div className={styles.contentActions} role="group" aria-labelledby={block.id + "-code-actions-label"}>
+              <strong id={block.id + "-code-actions-label"}>Блок {index + 1}</strong>
+              <button type="button" className={styles.primaryButton} disabled={!hasChanges || hasInvalidContent || blockingValidationIssues.length > 0} onClick={copyBlockCode}>
+                СКОПИРОВАТЬ КОД БЛОКА
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={resetChanges} disabled={!hasChanges && !hasInvalidContent}>
+                Сбросить
+              </button>
+              <span role="status" className={styles.copyFeedback}>{copyMessage}</span>
+            </div>,
+            codeActionsTarget,
+          ) : null}
 
           {!hasSource ? (
             <p className={styles.emptyState}>
@@ -1331,6 +1345,7 @@ export default function HtmlContentEditor() {
   const [previewScale, setPreviewScale] = useState(1);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const [codeActionsTarget, setCodeActionsTarget] = useState<HTMLDivElement | null>(null);
   const viewport = previewViewportById(viewportId);
   const preview = useMemo(() => {
     const instanceId = crypto.randomUUID();
@@ -1470,13 +1485,14 @@ export default function HtmlContentEditor() {
               </div>)}
             </div> : <p className={preview.error ? styles.errorState : styles.emptyState}>{preview.error || "После загрузки кода здесь появится Preview."}</p>}
           </div>
+          <div className={styles.previewCodeActions} ref={setCodeActionsTarget} />
         </div>
         {videos.length ? <VideoGallery entries={videos} selectedKey={selectedVideoKey} onOpen={(entry, trigger) => {
           setVideoTrigger(trigger);
           selectVideo(entry.blockId, entry.entity.id); setModal(null); setVideoModalKey(entry.key);
         }} /> : null}
         </div>
-        <div className={styles.blockStack}>{blocks.map((block, index) => <BlockFields key={block.id} block={block} index={index} selected={selected} onChange={changeBlock} send={send} onSelectVideo={selectVideo} />)}</div>
+        <div className={styles.blockStack}>{blocks.map((block, index) => <BlockFields key={block.id} block={block} index={index} codeActionsTarget={codeActionsTarget} selected={selected} onChange={changeBlock} send={send} onSelectVideo={selectVideo} />)}</div>
       </section>
       {modalVideo ? <VideoModal key={`${modalVideo.key}:${modalVideo.source}`} entry={modalVideo} trigger={videoTrigger} onClose={closeVideoModal} /> : null}
       {modal ? createPortal(<div className={styles.modalBackdrop} data-ui-theme="editor" onClick={() => setModal(null)}><section className={styles.codeModal} role="dialog" aria-modal="true" aria-label={modal.title} onClick={event => event.stopPropagation()}><h2>{modal.title}</h2><button type="button" className={styles.secondaryButton} onClick={() => setModal(null)}>Закрыть</button><pre className={styles.outputCode}>{modal.code}</pre></section></div>, document.body) : null}

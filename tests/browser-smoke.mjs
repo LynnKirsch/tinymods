@@ -813,6 +813,26 @@ async function editorScenario(page) {
   await page.wait(() => !document.querySelector('.cookie-consent'), 'Editor necessary choice');
   await checkFooterSettings(page);
   assert.equal(await page.fn(() => Array.from(document.querySelectorAll('label,button,h2,h3')).some(el => /^(Проект|Проекты|Сохранить проект|Восстановить проект)$/i.test(el.textContent.trim()))), false);
+  const actions = block => `[role="group"][aria-labelledby="block-${block}-code-actions-label"]`;
+  const clickAction = (block, text) => page.clickText(text, 'document.querySelector(' + JSON.stringify(actions(block)) + ')');
+  const copyLabel = 'СКОПИРОВАТЬ КОД БЛОКА';
+  async function actionState(block, copyEnabled, resetEnabled) {
+    const state = await page.fn(selector => {
+      const group = document.querySelector(selector);
+      const buttons = [...group.querySelectorAll('button')];
+      return {
+        label: group.querySelector('strong').textContent,
+        buttons: buttons.map(button => ({ label: button.textContent.trim(), enabled: !button.disabled })),
+      };
+    }, actions(block));
+    assert.deepEqual(state, { label: 'Блок ' + block, buttons: [
+      { label: copyLabel, enabled: copyEnabled }, { label: 'Сбросить', enabled: resetEnabled },
+    ] });
+  }
+  const feedback = block => page.fn(selector => document.querySelector(selector + ' [role="status"]').textContent, actions(block));
+  await page.wait(() => Boolean(document.querySelector('[aria-labelledby="block-1-code-actions-label"]')), 'Preview code actions rendered');
+  await actionState(1, false, false);
+
   const fixture = await readFile('tests/fixtures/html-content-editor/responsive-slider.html', 'utf8');
   const article = fixture.match(/<article\b[\s\S]*?<\/article>/)?.[0];
   assert.ok(article?.includes('<h2>Sample card one</h2>'), 'Existing synthetic fixture structure');
@@ -843,7 +863,11 @@ async function editorScenario(page) {
   await page.clickText('Загрузить код', 'document.querySelector("section[aria-label=\\"Загрузка кода\\"]")');
   await page.wait(() => Boolean(document.querySelector('input[aria-label="Заголовок"]')), 'Content heading input');
   const headingSelector = 'input[aria-label="Заголовок"]';
+  await actionState(1, false, false);
+  await page.fill(headingSelector, 'Sample card one');
+  await actionState(1, false, false);
   await page.fill(headingSelector, 'Smoke updated heading');
+  await actionState(1, true, true);
   step('verify edited text inside real sandboxed Preview');
   const previewChecks = [
     { field: 'heading', name: 'Preview edited heading', expected: 'Smoke updated heading' },
@@ -906,11 +930,62 @@ async function editorScenario(page) {
     }, 'Preview width ' + width + ' without horizontal overflow');
     assert.equal(await page.fn(() => document.documentElement.scrollWidth <= innerWidth + 2), true, 'Editor page has no horizontal overflow');
   }
+  step('measure placement of code actions below the main Preview and above the video gallery');
+  const actionWidths = [390, 479, 480, 639, 640, 959, 960, 1199, 1200, 1439, 1440, 1919, 1920, 2559, 2560];
+  for (const width of actionWidths) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    const geometry = await page.fn(async selector => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const group = document.querySelector(selector);
+      const strip = group.parentElement;
+      const stage = strip.previousElementSibling;
+      const panel = strip.parentElement;
+      const gallery = document.querySelector('section[aria-label="Предпросмотр видео"]');
+      const content = document.querySelector('[data-content-scroll]');
+      const bounds = group.getBoundingClientRect();
+      const stageBounds = stage.getBoundingClientRect();
+      return {
+        width: innerWidth,
+        belowPreview: Boolean(stage.querySelector('iframe[sandbox="allow-scripts"]')) && stageBounds.bottom <= bounds.top + 1,
+        aboveGallery: Boolean(gallery && gallery === panel.nextElementSibling &&
+          strip.getBoundingClientRect().bottom <= gallery.getBoundingClientRect().top + 1),
+        visibleButtonsFit: [...group.querySelectorAll('button')].every(button => {
+          const rect = button.getBoundingClientRect();
+          return rect.height >= 44 && rect.left >= bounds.left && rect.right <= bounds.right;
+        }),
+        copyCount: [...document.querySelectorAll('button')].filter(button => button.textContent.trim() === 'СКОПИРОВАТЬ КОД БЛОКА').length,
+        resetCount: [...document.querySelectorAll('button')].filter(button => button.textContent.trim() === 'Сбросить').length,
+        position: getComputedStyle(panel.parentElement).position,
+        contentScroll: getComputedStyle(content).overflowY,
+        pageFits: document.documentElement.scrollWidth <= innerWidth + 2,
+      };
+    }, actions(1));
+    assert.deepEqual(geometry, {
+      width, belowPreview: true, aboveGallery: true, visibleButtonsFit: true, copyCount: 1, resetCount: 1,
+      position: width >= 960 ? 'sticky' : 'static', contentScroll: 'auto', pageFits: true,
+    }, 'Preview code actions at ' + width + ' px');
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.click('section[aria-label="Предпросмотр видео"] button[aria-label="Открыть видео 1"]');
+  await page.wait(() => Boolean(document.querySelector('[role="dialog"][aria-label="Предпросмотр видео"]')), 'Video gallery opens its modal');
+  await page.clickText('Закрыть', 'document.querySelector(' + JSON.stringify('[role="dialog"][aria-label="Предпросмотр видео"]') + ')');
+  await page.wait(() => !document.querySelector('[role="dialog"][aria-label="Предпросмотр видео"]'), 'Video modal closes');
+
   step('copy edited block and read native clipboard');
   await protocol.send('Browser.grantPermissions', {
     browserContextId: page.context, origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
   });
-  await page.clickText('СКОПИРОВАТЬ КОД БЛОКА');
+  await page.fn(() => Object.defineProperty(navigator.clipboard, 'writeText', {
+    configurable: true, value: () => Promise.reject(new DOMException('Denied', 'NotAllowedError')),
+  }));
+  await clickAction(1, copyLabel);
+  await until(async () => (await feedback(1)) === 'Не удалось скопировать код.', 'Rejected Clipboard API has no success confirmation');
+  await page.fn(() => { delete navigator.clipboard.writeText; });
+  await clickAction(1, copyLabel);
+  await until(async () => (await feedback(1)) === 'СКОПИРОВАНО', 'Successful Clipboard API has confirmation');
+  assert.equal(await page.fn(() => [...document.querySelectorAll('button,[role="status"]')]
+    .filter(element => element.textContent.trim() === 'СКОПИРОВАНО').length), 1, 'Confirmation appears once');
+  await actionState(1, true, true);
   const copied = await until(async () => {
     const text = await page.evaluate('navigator.clipboard.readText()');
     return text.includes('Smoke updated heading') ? text : null;
@@ -921,14 +996,56 @@ async function editorScenario(page) {
   await checkHelp(page, { selector: headingSelector, value: 'Smoke updated heading' });
   const canonical = await page.fn(() => document.querySelector('link[rel="canonical"]')?.href);
   assert.match(canonical, /^https:\/\/tinymods\.ru\/html-content-editor\/?$/);
-  await page.clickText('Загрузить другой код');
+  step('test edited media, reset and copy per block');
+  await clickAction(1, copyLabel);
+  await until(async () => (await feedback(1)) === 'СКОПИРОВАНО', 'Copy confirmation before further editing');
+  await page.fill(headingSelector, 'Smoke edited again');
+  assert.equal(await feedback(1), '', 'Editing clears the previous copy confirmation');
+
+  await page.clickText('+ ДОБАВИТЬ БЛОК');
+  const webp = await page.fn(() => document.createElement('canvas').toDataURL('image/webp'));
+  assert.ok(webp.startsWith('data:image/webp;'));
+  const secondSource = '<!-- second --><section><h2>Second block</h2><img src="' + webp + '" alt="Smoke ALT"></section>';
+  const secondInput = '#block-2-fragment-1';
+  await page.fill(secondInput, secondSource);
+  await page.clickText('Загрузить код', 'document.querySelector(' + JSON.stringify(secondInput) + ').parentElement');
+  const secondImage = '[data-content-scroll] input[id^="block-2-image-"][id$="-src"]';
+  await page.wait(() => Boolean(document.querySelector('input[id^="alt-image-"]')), 'Second block ALT field');
+  await actionState(2, false, false);
+  await page.fill('input[id^="alt-image-"]', 'Changed ALT');
+  await actionState(2, true, true);
+  await clickAction(2, copyLabel);
+  await until(async () => (await page.evaluate('navigator.clipboard.readText()')) === secondSource.replace('Smoke ALT', 'Changed ALT'), 'Copy targets block 2 only');
+  await until(async () => (await feedback(2)) === 'СКОПИРОВАНО', 'Block 2 has its own copy confirmation');
+  await clickAction(2, 'Сбросить');
+  await actionState(2, false, false);
+  assert.equal(await feedback(2), '', 'Reset clears the previous copy confirmation');
+  assert.equal(await page.fn(selector => document.querySelector(selector).value, 'input[id^="alt-image-"]'), 'Smoke ALT');
+
+  await page.fill(secondImage, portrait);
+  await actionState(2, true, true);
+  await clickAction(2, copyLabel);
+  await until(async () => (await page.evaluate('navigator.clipboard.readText()')) === secondSource.replace(webp, portrait), 'Image URL edit exports only the changed URL');
+  await page.clickExpression('document.querySelector(' + JSON.stringify(secondImage) + ').parentElement.querySelector(' + JSON.stringify('button[aria-label="Очистить медиа"]') + ')');
+  await actionState(2, false, true);
+  assert.equal(await page.fn(selector => document.querySelector(selector).getAttribute('aria-invalid'), secondImage), 'true');
+  await actionState(1, true, true);
+  await clickAction(2, 'Сбросить');
+  await actionState(2, false, false);
+  assert.equal(await page.fn(selector => document.querySelector(selector).value, secondImage), webp);
+  assert.equal(await page.fn(selector => document.querySelector(selector).value, headingSelector), 'Smoke edited again', 'Reset block 2 preserves block 1');
+
+  await clickAction(1, 'Сбросить');
+  await actionState(1, false, false);
+  await until(async () => (await page.frameHeading())?.heading === 'Sample card one', 'Reset restores original heading in Preview');
+  await page.clickText('Загрузить другой код', 'document.querySelector("#block-1-fragment-1").parentElement');
   await page.fill('#block-1-fragment-1', '<section id="smoke-block"><h2>В новом блоке</h2></section>');
-  await page.clickText('Загрузить код', 'document.querySelector("section[aria-label=\\"Загрузка кода\\"]")');
+  await page.clickText('Загрузить код', 'document.querySelector("#block-1-fragment-1").parentElement');
   await until(async () => (await page.frameHeading())?.heading === 'В\u00a0новом блоке', 'Replacement Preview applies typography');
-  assert.equal(await page.fn(() => document.querySelector('[data-content-scroll] [data-media-preview]')), null,
-    'Replacement clears old media thumbnails');
+  assert.equal(await page.fn(() => document.querySelector('[data-content-scroll]').querySelector('[data-media-preview]')), null,
+    'Replacement clears old media thumbnails in block 1');
   page.healthy();
-  return { previewWidths: [390, 1440], clipboardCharacters: copied.length, canonical };
+  return { previewWidths: [390, 1440], actionWidths, clipboardCharacters: copied.length, canonical };
 }
 
 async function shellScenario(page) {
