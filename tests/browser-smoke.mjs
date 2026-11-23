@@ -324,6 +324,9 @@ class Page {
     return { backendNodeId: node.backendNodeId, frameId: node.frameId };
   }
   async frameHeading() {
+    return this.evaluatePreview('({ heading:document.querySelector("#smoke-block h2")?.textContent, typography:document.querySelector("#smoke-typography")?.textContent, dynamicText:document.querySelector("#smoke-dynamic")?.textContent, dynamicScript:document.querySelector("#smoke-dynamic")?.getAttribute("data-smoke-script"), preformatted:document.querySelector("#smoke-pre")?.textContent, imageUrl:document.querySelector("#smoke-block picture img")?.currentSrc, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })');
+  }
+  async evaluatePreview(expression) {
     this.lastPreview = { targets: this.targetDiagnostics(), frames: [] };
     try {
       const owner = await this.previewOwner();
@@ -359,8 +362,7 @@ class Page {
       const { executionContextId } = await protocol.send('Page.createIsolatedWorld', {
         frameId: owner.frameId, worldName: 'optima-smoke-read-only',
       }, candidate.sessionId);
-      const preview = await this.evaluate('({ heading:document.querySelector("#smoke-block h2")?.textContent, typography:document.querySelector("#smoke-typography")?.textContent, dynamicText:document.querySelector("#smoke-dynamic")?.textContent, dynamicScript:document.querySelector("#smoke-dynamic")?.getAttribute("data-smoke-script"), preformatted:document.querySelector("#smoke-pre")?.textContent, imageUrl:document.querySelector("#smoke-block picture img")?.currentSrc, width:innerWidth, overflow:document.documentElement.scrollWidth>innerWidth+2, readyState:document.readyState })',
-        executionContextId, candidate.sessionId);
+      const preview = await this.evaluate(expression, executionContextId, candidate.sessionId);
       const current = await this.previewOwner();
       if (!candidate.attached || current?.backendNodeId !== owner.backendNodeId || current?.frameId !== owner.frameId) {
         this.lastPreview.state = 'Preview owner replaced during DOM read';
@@ -1212,6 +1214,92 @@ async function editorMediaScenario(page) {
   return { imageBytes: smokeImage.length, sharedHeadRequests: 1, partialVideoBytes: 512 * 1024, decodedFrame: '32 × 24', posterAndFallback: true };
 }
 
+async function editorLogicalGroupsScenario(page) {
+  await page.navigate('/html-content-editor/');
+  await page.clickText('Только необходимые', 'document.querySelector(".cookie-consent")');
+  await page.wait(() => !document.querySelector('.cookie-consent'), 'Consent dismissed');
+  const source = (await readFile('tests/fixtures/html-content-editor/logical-components.html', 'utf8')).replace(/\r\n/g, '\n');
+  const load = async (block, html) => {
+    const selector = '#block-' + block + '-fragment-1';
+    await page.fill(selector, html);
+    await page.clickText('Загрузить код', 'document.querySelector(' + JSON.stringify(selector) + ').parentElement');
+  };
+  const actions = block => 'document.querySelector("[aria-labelledby=\\"block-' + block + '-code-actions-label\\"]")';
+  const selectInPreview = async selector => {
+    await until(async () => (await page.evaluatePreview(`(() => {
+      const target = document.querySelector(${JSON.stringify(selector)});
+      if (!target || target.closest('[inert]') || !target.getClientRects().length) return {};
+      target.click();
+      return { clicked: true };
+    })()`))?.clicked, 'Visible Preview selection: ' + selector);
+  };
+  const selected = (side, title) => page.wait(() => {
+    const field = document.querySelector('[data-logical-side][open] [data-selected-field]');
+    const group = field?.closest('[data-logical-group][open]');
+    if (!group) return false;
+    const panel = field.closest('[data-content-scroll]');
+    const fieldBounds = field.getBoundingClientRect();
+    const panelBounds = panel.getBoundingClientRect();
+    return fieldBounds.bottom >= panelBounds.top && fieldBounds.top <= panelBounds.bottom;
+  }, 'Selected field in open logical side').then(async () => {
+    assert.deepEqual(await page.fn(() => {
+      const field = document.querySelector('[data-logical-side][open] [data-selected-field]');
+      return [field.closest('[data-logical-side]').querySelector('summary span').textContent,
+        field.closest('[data-logical-group]').querySelector('summary span').textContent];
+    }), [side, title]);
+  });
+
+  await load(1, source);
+  await page.wait(() => document.querySelectorAll('[data-logical-group]').length === 5, 'Five logical groups');
+  const fields = await page.fn(() => document.querySelectorAll('[data-content-scroll] input,[data-content-scroll] textarea').length);
+  assert.equal(fields, 26, 'All editable fields render exactly once');
+  assert.deepEqual(await page.fn(() => [...document.querySelectorAll('[data-logical-group] > summary span')].map(el => el.textContent)),
+    ['Заголовки блока', 'Grove front', 'Pond front', 'Самостоятельные фотографии', 'Декоративные изображения']);
+  await selectInPreview('#grove-front h3');
+  await selected('Лицевая сторона', 'Grove front');
+  await selectInPreview('#grove-front button');
+  await selectInPreview('#grove-back img');
+  await selected('Оборотная сторона', 'Grove front');
+  assert.equal(await page.fn(() => Boolean(document.querySelector('[data-logical-side] [data-selected-field] [data-media-preview]'))), true);
+  assert.equal((await page.evaluatePreview('({ front: document.querySelector("#grove-front").inert, back: document.querySelector("#grove-back").inert })')).front, true);
+
+  const backSide = '[data-logical-group] [data-logical-side][open] [data-selected-field]';
+  await page.click(backSide + ' button[aria-label="Очистить медиа"]');
+  await page.clickExpression('document.querySelector(' + JSON.stringify(backSide) + ').closest("[data-logical-group]").querySelector("summary")');
+  await page.wait(() => Boolean(document.querySelector('[data-logical-group]:not([open]) > summary em')), 'Collapsed group shows blocking error');
+  assert.equal(await page.fn(() => document.querySelector('[aria-labelledby="block-1-code-actions-label"] button').disabled), true);
+  await page.clickText('Сбросить', actions(1));
+
+  await page.clickExpression('Array.from(document.querySelectorAll("[aria-label=\\"Размер предпросмотра\\"] button")).find(el => el.querySelector("small")?.textContent === "390")');
+  await until(async () => {
+    const state = await page.evaluatePreview(`(() => {
+      const card = document.querySelector("[data-sample-card=pond]");
+      return { width: innerWidth, order: card ? getComputedStyle(card).order : "" };
+    })()`);
+    return state?.width === 390 && state.order === '-1';
+  }, 'Mobile Preview reorders cards');
+  await selectInPreview('#grove-front h3');
+  await selected('Лицевая сторона', 'Grove front');
+  await page.fill('[data-logical-group] [data-selected-field] input', 'Renamed grove');
+  await page.wait(() => [...document.querySelectorAll('[data-logical-group][open] > summary span')].some(el => el.textContent === 'Renamed grove'), 'Open card keeps its state after rename');
+  await page.clickText('+ ДОБАВИТЬ БЛОК');
+  const otherBlock = await page.wait(() => document.querySelectorAll('textarea[id$="-fragment-1"]')[1]?.id.split('-')[1],
+    'Independent block code input');
+  const independentTitle = '#block-' + otherBlock + '-content-0-text';
+  await load(otherBlock, '<h2>Independent block</h2>');
+  await page.fill(independentTitle, 'Independent edit');
+  await protocol.send('Browser.grantPermissions', {
+    browserContextId: page.context, origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
+  });
+  await page.clickText('СКОПИРОВАТЬ КОД БЛОКА', actions(1));
+  await until(async () => (await page.evaluate('navigator.clipboard.readText()')) === source.replace('Grove front', 'Renamed grove'), 'Copy preserves the exact edited block');
+  await page.clickText('Сбросить', actions(1));
+  assert.equal(await page.fn(selector => document.querySelector(selector).value, independentTitle), 'Independent edit');
+  assert.equal(await page.fn(() => document.querySelector('[aria-labelledby="block-1-code-actions-label"] button').disabled), true);
+  page.healthy();
+  return { logicalGroups: 5, fields, facesSelected: 2, previewWidths: [1440, 390], exactClipboard: true };
+}
+
 const mime = { '.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
   '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css',
   '.wasm': 'application/wasm', '.json': 'application/json', '.webmanifest': 'application/manifest+json',
@@ -1325,6 +1413,7 @@ async function main() {
     await runCase('Image Optimizer: individual and batch scope', batchScenario, { workers: true });
     await runCase('HTML Editor: load/edit/Preview/clipboard', editorScenario);
     await runCase('HTML Editor: cached image bytes and bounded video thumbnails', editorMediaScenario);
+    await runCase('HTML Editor: logical groups and Preview selection', editorLogicalGroupsScenario);
     await runCase('Shell navigation and help', shellScenario);
     await runCase('Consent UI with intercepted local probe SDK', consentScenario, { analytics: true });
     results.push({ name: 'Browser AVIF fallback fault injection', status: 'NOT TESTED',
@@ -1342,7 +1431,7 @@ async function main() {
       '\nPASS applies only to the named assertions. Real Yandex SDK revocation and browser fallback are NOT TESTED. No screenshots, HTML or downloads are uploaded.\n'];
     await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
   }
-  assert.ok(results.filter(r => r.status === 'PASS').length === 6 && !results.some(r => r.status === 'FAIL'),
+  assert.ok(results.filter(r => r.status === 'PASS').length === 7 && !results.some(r => r.status === 'FAIL'),
     'Mandatory browser smoke scenarios did not all pass');
 }
 

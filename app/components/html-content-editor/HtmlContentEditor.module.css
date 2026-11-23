@@ -958,6 +958,26 @@
   gap: 12px;
 }
 
+.logicalGroup summary span {
+  overflow-wrap: anywhere;
+}
+
+.logicalGroup summary em {
+  flex-shrink: 0;
+}
+
+.logicalFields {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.logicalGroup [data-selected-field] {
+  outline: 2px solid var(--ui-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--ui-radius-sm);
+}
+
 .slideContentBlock {
   min-width: 0;
   padding-top: 12px;

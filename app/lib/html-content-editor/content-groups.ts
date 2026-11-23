@@ -1,5 +1,6 @@
 import type { EditableEntity } from "./types";
 import type { AccordionGroup } from "./accordion-groups";
+import type { ImageGroup } from "./image-groups";
 
 type ElementNode = {
   id: string;
@@ -97,7 +98,7 @@ function isSelfClosingTag(tag: string, name: string) {
   return /\/\s*>$/.test(tag) || VOID_ELEMENTS.test(name);
 }
 
-function collectElementNodes(source: string) {
+function collectElementNodes(source: string, skipRawText = false) {
   const nodes: ElementNode[] = [];
   const stack: OpenNode[] = [];
   let cursor = 0;
@@ -119,6 +120,13 @@ function collectElementNodes(source: string) {
     const tagName = readTagName(tag);
     if (!tagName) {
       cursor = tagEnd + 1;
+      continue;
+    }
+
+    if (skipRawText && !tag.startsWith("</") && /^(script|style|template|textarea|title)$/.test(tagName)) {
+      const closing = new RegExp(`</${tagName}\\s*>`, "gi");
+      closing.lastIndex = tagEnd + 1;
+      cursor = closing.exec(source) ? closing.lastIndex : source.length;
       continue;
     }
 
@@ -282,6 +290,187 @@ export function buildContentGroups(
   }
 
   return groups.sort((left, right) => groupStart(left) - groupStart(right));
+}
+
+type LogicalEntry = (
+  | { kind: "content"; group: ContentGroup }
+  | { kind: "image"; group: ImageGroup; label?: string }
+) & { entities: EditableEntity[]; start: number; end: number };
+
+type LogicalSection = { id: string; label?: string; entries: LogicalEntry[] };
+
+export type LogicalContentGroup = {
+  id: string;
+  label: string;
+  headings: EditableEntity[];
+  sections: LogicalSection[];
+};
+
+function logicalAttributes(tag: string) {
+  const attributes = new Map<string, string>();
+  const body = tag.replace(/^<\s*[\w:-]+/, "");
+  for (const match of body.matchAll(/([^\s"'<>/=`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)) {
+    const name = match[1].toLowerCase();
+    if (!attributes.has(name)) attributes.set(name, match[2] ?? match[3] ?? match[4] ?? "");
+  }
+  return attributes;
+}
+
+function logicalEntryRange(entities: EditableEntity[]) {
+  return {
+    entities,
+    start: Math.min(...entities.map(entity => entity.range.start)),
+    end: Math.max(...entities.map(entity => entity.range.end)),
+  };
+}
+
+function containsRange(outer: { start: number; end: number }, inner: { start: number; end: number }) {
+  return outer.start <= inner.start && outer.end >= inner.end;
+}
+
+export function buildLogicalContentGroups(source: string, content: ContentGroup[], images: ImageGroup[]) {
+  const orderedGroups: Array<{ scopeStart: number; rank: number; group: LogicalContentGroup }> = [];
+  const ownedContentIds = new Set<string>();
+  const ownedImageIds = new Set<string>();
+  if (!/<article\b/i.test(source) || !/\baria-controls\s*=/i.test(source)) {
+    return { groups: [], ownedContentIds, ownedImageIds };
+  }
+
+  const nodes = collectElementNodes(source, true);
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const attributes = new Map(nodes.map(node => [node.id, logicalAttributes(source.slice(node.start, node.openEnd))]));
+  const targets = new Map<string, ElementNode | null>();
+  for (const node of nodes) {
+    const id = attributes.get(node.id)?.get("id");
+    if (id) targets.set(id, targets.has(id) ? null : node);
+  }
+
+  function ancestor(node: ElementNode, tag: string) {
+    let current = byId.get(node.parentId);
+    while (current && current.tagName !== tag) current = byId.get(current.parentId);
+    return current;
+  }
+
+  const edges = new Map<string, Array<{ trigger: ElementNode; target: ElementNode }>>();
+  for (const node of nodes) {
+    const attrs = attributes.get(node.id)!;
+    const controls = attrs.get("aria-controls")?.trim();
+    if (!controls || /\s/.test(controls) || (node.tagName !== "button" && attrs.get("role") !== "button")) continue;
+    const owner = ancestor(node, "article");
+    const target = targets.get(controls);
+    if (!owner || !target || ancestor(target, "article") !== owner) continue;
+    const list = edges.get(owner.id) ?? [];
+    list.push({ trigger: node, target });
+    edges.set(owner.id, list);
+  }
+
+  const entries: LogicalEntry[] = [
+    ...content.map((group): LogicalEntry => ({ kind: "content", group, ...logicalEntryRange(group.entities) })),
+    ...images.map((group): LogicalEntry => ({
+      kind: "image",
+      group,
+      ...logicalEntryRange([...group.items.map(item => item.entity), ...(group.altEntity ? [group.altEntity] : [])]),
+    })),
+  ].sort((left, right) => left.start - right.start);
+  const occurrences = new Map<string, number>();
+  for (const { entities } of entries) {
+    for (const { id } of entities) occurrences.set(id, (occurrences.get(id) ?? 0) + 1);
+  }
+  const eligible = entries.filter(entry => entry.entities.length && entry.entities.every(entity => occurrences.get(entity.id) === 1));
+
+  function addGroup(scopeStart: number, rank: number, group: LogicalContentGroup) {
+    for (const { entries } of group.sections) {
+      for (const entry of entries) {
+        (entry.kind === "content" ? ownedContentIds : ownedImageIds).add(entry.group.id);
+      }
+    }
+    orderedGroups.push({ scopeStart, rank, group });
+  }
+
+  const scopes = new Map<ElementNode, number>();
+  const articles = nodes.filter(node => node.tagName === "article").sort((left, right) => left.start - right.start);
+  const initiallyHidden = (node: ElementNode) => {
+    const attrs = attributes.get(node.id)!;
+    return attrs.has("inert") || attrs.has("hidden") || attrs.get("aria-hidden")?.toLowerCase() === "true";
+  };
+  for (const article of articles) {
+    const links = edges.get(article.id) ?? [];
+    const pairs = new Map<string, [ElementNode, ElementNode]>();
+    if (ancestor(article, "article")) continue;
+    for (const { trigger, target } of links) {
+      for (const other of links) {
+        if (containsRange(other.target, trigger) && containsRange(target, other.trigger) &&
+          target.parentId === other.target.parentId &&
+          initiallyHidden(target) && !initiallyHidden(other.target)) {
+          pairs.set(`${other.target.id}|${target.id}`, [other.target, target]);
+        }
+      }
+    }
+    if (pairs.size !== 1) continue;
+    const [front, back] = [...pairs.values()][0];
+    if (articles.some(other => other !== article && containsRange(article, other))) continue;
+    const sections = [front, back].map((side, index) => ({
+      id: `logical-side:${side.id}`,
+      label: index === 0 ? "Лицевая сторона" : "Оборотная сторона",
+      entries: eligible.filter(entry => containsRange(side, entry)).map(entry =>
+        entry.kind === "image" && links.some(link => containsRange(side, link.trigger) && containsRange(link.trigger, entry))
+          ? { ...entry, label: "Иконка переключения" }
+          : entry),
+    }));
+    if (sections.some(section => !section.entries.length)) continue;
+    const headings = sections.flatMap(section => {
+      const heading = section.entries.flatMap(entry => entry.entities).find(entity =>
+        entity.context.type === "text" && /^h[1-6]$/.test(entity.context.tagName));
+      return heading ? [heading] : [];
+    });
+    const scope = ancestor(article, "section");
+    if (scope && !scopes.has(scope)) scopes.set(scope, article.start);
+    addGroup(scope?.start ?? article.start, 1, {
+      id: `logical-card:${article.id}`,
+      label: `Карточка ${articles.indexOf(article) + 1}`,
+      headings,
+      sections,
+    });
+  }
+
+  for (const [scope, firstCard] of scopes) {
+    function belongsToScope(node: ElementNode) {
+      return !ancestor(node, "article") && ancestor(node, "section") === scope;
+    }
+    function addSection(rank: number, kind: string, label: string, entries: LogicalEntry[]) {
+      if (!entries.length) return;
+      const id = `logical-${kind}:${scope.id}`;
+      addGroup(scope.start, rank, { id, label, headings: [], sections: [{ id, entries }] });
+    }
+
+    const headingId = attributes.get(scope.id)?.get("aria-labelledby")?.trim();
+    const heading = headingId ? targets.get(headingId) : null;
+    if (heading && /^h[1-6]$/.test(heading.tagName) && belongsToScope(heading) && heading.end <= firstCard) {
+      const subtitles = nodes.filter(node => node.tagName === "p" && node.parentId === heading.parentId &&
+        heading.parentId !== scope.id && node.start >= heading.end && node.end <= firstCard);
+      addSection(0, "headings", "Заголовки блока", eligible.filter(entry =>
+        entry.kind === "content" && entry.group.kind === "text" &&
+        [heading, ...subtitles].some(node => containsRange(node, entry))));
+    }
+    const standalone: LogicalEntry[] = [];
+    const decorative: LogicalEntry[] = [];
+    for (const entry of eligible) {
+      if (entry.kind !== "image" || ownedImageIds.has(entry.group.id)) continue;
+      if (nodes.some(node => node.tagName === "figure" && containsRange(node, entry) && belongsToScope(node))) {
+        standalone.push(entry);
+        continue;
+      }
+      const image = nodes.find(node => node.tagName === "img" && containsRange(node, entry) && belongsToScope(node));
+      const attrs = image ? attributes.get(image.id) : undefined;
+      if (attrs?.get("aria-hidden")?.toLowerCase() === "true" && attrs.get("alt") === "") decorative.push(entry);
+    }
+    addSection(2, "photos", "Самостоятельные фотографии", standalone);
+    addSection(3, "decorative", "Декоративные изображения", decorative);
+  }
+
+  const groups = orderedGroups.sort((left, right) => left.scopeStart - right.scopeStart || left.rank - right.rank)
+    .map(item => item.group);
+  return { groups, ownedContentIds, ownedImageIds };
 }
 
 function entitiesByIds(entities: EditableEntity[], ids: string[]) {

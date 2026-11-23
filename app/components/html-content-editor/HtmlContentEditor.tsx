@@ -13,8 +13,10 @@ import { detectAccordionGroups } from "../../lib/html-content-editor/accordion-g
 import {
   buildAccordionContentItems,
   buildContentGroups,
+  buildLogicalContentGroups,
   type AccordionContentItem,
   type ContentGroup,
+  type LogicalContentGroup,
 } from "../../lib/html-content-editor/content-groups";
 import { extractEditableEntitiesWithVideoStories } from "../../lib/html-content-editor/extract-editable-entities";
 import {
@@ -667,6 +669,16 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
     [extraction.entities, extraction.videoStoryByImageEntityId, imageGroups],
   );
   const videoStoryEntityByEntityId = videoStories.storyEntityByEntityId;
+  const standaloneImageGroups = useMemo(
+    () => imageGroups.filter(group => !videoStories.relatedGroupIds.has(group.id) &&
+      !group.items.some(item => isVideoEntity(item.entity))),
+    [imageGroups, videoStories],
+  );
+  const logicalContent = useMemo(
+    () => buildLogicalContentGroups(source, contentGroups, standaloneImageGroups),
+    [source, contentGroups, standaloneImageGroups],
+  );
+  const selectedEntityId = selected?.blockId === block.id ? selected.entityId : null;
   const blockingValidationIssues = useMemo(
     () => validateRequiredImageValues(extraction.entities, values),
     [extraction.entities, values],
@@ -763,7 +775,9 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
     const metadataText = options.metadataText ?? (video ? "Ссылка на видео" : imageRoleLabel(entity));
 
     return (
-      <div className={`${styles.imageUrlControl} ${issue ? styles.fieldWarning : ""}`} ref={node => { contentGroupRefs.current[`entity:${entity.id}`] = node; }}>
+      <div className={`${styles.imageUrlControl} ${issue ? styles.fieldWarning : ""}`}
+        data-selected-field={selectedEntityId === entity.id ? "" : undefined}
+        ref={node => { contentGroupRefs.current[`entity:${entity.id}`] = node; }}>
         {usesImageMetadata(entity) || video ? <IntrinsicImagePreview key={previewSource} source={previewSource} video={video} /> : null}
         <div className={styles.mediaFieldHeader}>
           <label htmlFor={inputId}>
@@ -807,7 +821,8 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
 
   function renderAltControl(entity: EditableEntity & { kind: "alt" }, inputId: string) {
     return (
-      <div className={styles.altField}>
+      <div className={styles.altField} data-selected-field={selectedEntityId === entity.id ? "" : undefined}
+        ref={node => { contentGroupRefs.current[`entity:${entity.id}`] = node; }}>
         <label htmlFor={inputId}>ALT изображения</label>
         <input
           id={inputId}
@@ -970,6 +985,7 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
       <div
         className={`${styles.lineField} ${hasLengthWarning || issue ? styles.fieldWarning : ""}`}
         key={entity.id}
+        data-selected-field={selectedEntityId === entity.id ? "" : undefined}
         ref={(node) => { contentGroupRefs.current[`entity:${entity.id}`] = node; }}
         onFocus={() => {
           previewAccordionControllerRef.current?.openForEntity(entity.id);
@@ -1021,7 +1037,7 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
     );
   }
 
-  function renderContentGroup(group: ContentGroup, index: number) {
+  function renderContentGroup(group: ContentGroup, index: number | string, logical = false) {
     if (group.kind === "link") {
       return (
         <section
@@ -1049,7 +1065,9 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
         {...contentGroupInteractionProps(group.id)}
       >
         <h2>{group.label}</h2>
-        {composite ? (
+        {logical ? group.entities.map((entity, entityIndex) =>
+          renderValueControl(entity, `content-${index}-text-${entityIndex}`, { hideLabel: !composite })
+        ) : composite ? (
           <div className={styles.compositeField}>
             {group.entities.map((entity) => (
               <label key={entity.id}>
@@ -1067,6 +1085,40 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
           renderValueControl(group.entities[0], `content-${index}-text`, { hideLabel: true })
         )}
       </section>
+    );
+  }
+
+  function renderLogicalGroup(group: LogicalContentGroup) {
+    const name = group.headings.map(entity => valueFor(entity).replace(/\s+/g, " ").trim()).find(Boolean) ?? group.label;
+    const sections = group.sections.map(section => {
+      const issueCount = section.entries.flatMap(entry => entry.entities).filter(entity =>
+        blockingValidationIssueByEntityId.has(entity.id) || compositeEditError(entity, valueFor(entity))).length;
+      return { ...section, issueCount };
+    });
+    const issueCount = sections.reduce((total, section) => total + section.issueCount, 0);
+    return (
+      <details className={`${styles.slideGroup} ${styles.logicalGroup}`} data-logical-group={group.id} key={group.id}>
+        <summary><span>{name}</span>{issueCount > 0 ? <em>Ошибок: {issueCount}</em> : null}</summary>
+        <div className={styles.slideGroupBody}>
+          {sections.map(section => {
+            const body = section.entries.map((entry, index) => {
+              const prefix = block.id + "-" + section.id + "-" + index;
+              return entry.kind === "content" ? renderContentGroup(entry.group, prefix, true) : (
+                <section className={styles.imageGroup} key={entry.group.id}>
+                  <h2>{entry.label ?? entry.group.title}</h2>
+                  {renderImageGroupContent(entry.group, prefix)}
+                </section>
+              );
+            });
+            return section.label ? (
+              <details className={styles.slideGroup} data-logical-side={section.id} key={section.id}>
+                <summary><span>{section.label}</span>{section.issueCount > 0 ? <em>Ошибок: {section.issueCount}</em> : null}</summary>
+                <div className={styles.slideGroupBody}>{body}</div>
+              </details>
+            ) : <div className={styles.logicalFields} key={section.id}>{body}</div>;
+          })}
+        </div>
+      </details>
     );
   }
 
@@ -1203,7 +1255,8 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
                 </section>
               ) : null}
 
-              {contentGroups.map(renderContentGroup)}
+              {logicalContent.groups.map(renderLogicalGroup)}
+              {contentGroups.filter(group => !logicalContent.ownedContentIds.has(group.id)).map((group, index) => renderContentGroup(group, index))}
 
               {sliderGroups.filter(group => !group.parentSliderId).map(renderSliderGroup)}
 
@@ -1281,7 +1334,7 @@ function BlockFields({ block, index, codeActionsTarget, selected, onChange, send
                     .map((group) => renderImageGroupContent(group, `story-${story.id}`, { storyField: true }))}
                 </section>
               ))}
-              {imageGroups.filter(group => !videoStories.relatedGroupIds.has(group.id) && !group.items.some(item => isVideoEntity(item.entity))).map((group) => (
+              {standaloneImageGroups.filter(group => !logicalContent.ownedImageIds.has(group.id)).map((group) => (
                 <section
                   className={`${styles.imageGroup} ${
                     activeGroupId === group.id ? styles.activeContentGroup : ""

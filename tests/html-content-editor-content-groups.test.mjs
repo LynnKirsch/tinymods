@@ -6,6 +6,7 @@ import { detectAccordionGroups } from "../app/lib/html-content-editor/accordion-
 import {
   buildAccordionContentItems,
   buildContentGroups,
+  buildLogicalContentGroups,
 } from "../app/lib/html-content-editor/content-groups.ts";
 import { createEditableEntityPatch, createEditableEntityPatches } from "../app/lib/html-content-editor/encode-source-value.ts";
 import { extractEditableEntities } from "../app/lib/html-content-editor/extract-editable-entities.ts";
@@ -28,6 +29,80 @@ const component = readFileSync(
   new URL("../app/components/html-content-editor/HtmlContentEditor.tsx", import.meta.url),
   "utf8",
 );
+
+const logicalFixture = readFileSync(new URL("./fixtures/html-content-editor/logical-components.html", import.meta.url), "utf8");
+
+function logicalFixtureLayout(source = logicalFixture) {
+  const entities = extractEditableEntities(source);
+  const content = buildContentGroups(source, entities.filter(entity => !isImageGroupEntity(entity)));
+  const images = groupImageEntities(entities);
+  return { entities, content, images, ...buildLogicalContentGroups(source, content, images) };
+}
+
+test("reciprocal controls group independent card faces and leave ambiguous fields in the existing lists", () => {
+  const { groups, entities, content, images, ownedContentIds, ownedImageIds } = logicalFixtureLayout();
+  assert.deepEqual(groups.map(group => group.headings[0]?.displayValue ?? group.label),
+    ["Заголовки блока", "Grove front", "Pond front", "Самостоятельные фотографии", "Декоративные изображения"]);
+  const [headings, grove, pond, photos, decorative] = groups;
+  assert.deepEqual(headings.sections[0].entries.flatMap(entry => entry.entities).map(display), ["Sample cards", "Introduction"]);
+  assert.deepEqual(grove.sections.map(side => side.label), ["Лицевая сторона", "Оборотная сторона"]);
+  assert.deepEqual(grove.headings.map(display), ["Grove front", "Grove back"]);
+  assert.deepEqual(pond.headings.map(display), ["Pond front", "Pond back"]);
+  assert.deepEqual(grove.sections[0].entries.flatMap(entry => entry.entities.map(entity => entity.kind)),
+    ["text", "srcset", "src", "alt", "src"]);
+  assert.deepEqual(photos.sections[0].entries.flatMap(entry => entry.entities).map(entity => entity.kind), ["src", "alt"]);
+  assert.deepEqual(decorative.sections[0].entries.flatMap(entry => entry.entities).map(entity => entity.kind), ["src"]);
+  const owned = groups.flatMap(group => group.sections.flatMap(section => section.entries.flatMap(entry => entry.entities)));
+  const fallback = [
+    ...content.filter(group => !ownedContentIds.has(group.id)).flatMap(group => group.entities),
+    ...images.filter(group => !ownedImageIds.has(group.id)).flatMap(group => [
+      ...group.items.map(item => item.entity), ...(group.altEntity ? [group.altEntity] : []),
+    ]),
+  ];
+  assert.deepEqual(fallback.map(display), ["Ambiguous front", "Ambiguous back"]);
+  assert.deepEqual([...owned, ...fallback].map(entity => entity.id).sort(), entities.map(entity => entity.id).sort());
+  const icons = [grove, pond].flatMap(group => group.sections.flatMap(section => section.entries))
+    .filter(entry => entry.label === "Иконка переключения").flatMap(entry => entry.entities);
+  assert.equal(icons.length, 4);
+  assert.equal(new Set(icons.map(entity => entity.rawValue)).size, 1);
+  assert.equal(new Set(icons.map(entity => entity.id)).size, 4);
+});
+
+test("cross-card, missing and duplicate control targets do not claim a card", () => {
+  for (const source of [
+    logicalFixture.replace('aria-controls="grove-back"', 'aria-controls="pond-back"'),
+    logicalFixture.replace('aria-controls="grove-back"', 'aria-controls="missing"'),
+    logicalFixture.replace('id="ambiguous-face"', 'id="grove-back"'),
+    logicalFixture.replace('id="grove-back" inert aria-hidden="true"', 'id="grove-back"'),
+  ]) {
+    const { groups } = logicalFixtureLayout(source);
+    assert.deepEqual(groups.filter(group => group.headings.length).map(group => group.headings[0].displayValue), ["Pond front"]);
+  }
+});
+
+test("logical ownership preserves individual ranges for edits on both faces", () => {
+  const { groups } = logicalFixtureLayout();
+  const [front, back] = groups[1].sections.map(section => section.entries.flatMap(entry => entry.entities));
+  for (const [entity, replacement] of [
+    [front.find(entity => entity.kind === "text"), "New front"],
+    [back.find(entity => entity.context.tagName === "h3"), "New back"],
+    [back.find(entity => entity.context.tagName === "p"), "Grove details."],
+    [front.find(entity => entity.kind === "src"), "/new.webp"],
+    [back.find(entity => entity.kind === "alt"), "New description"],
+    [front.at(-1), "/new-icon.svg"],
+  ]) {
+    assert.ok(entity);
+    const patches = createEditableEntityPatches(entity, replacement);
+    assert.ok(patches.length);
+    assert.ok(patches.every(patch => patch.start >= entity.range.start && patch.end <= entity.range.end));
+    const edited = applySourcePatches(logicalFixture, patches);
+    assert.ok(edited.startsWith(logicalFixture.slice(0, entity.range.start)));
+    assert.ok(edited.endsWith(logicalFixture.slice(entity.range.end)));
+    const next = logicalFixtureLayout(edited);
+    assert.equal(next.groups.length, groups.length);
+    assert.equal(next.entities.length, extractEditableEntities(logicalFixture).length);
+  }
+});
 
 function requireEntity(entities, predicate) {
   const entity = entities.find(predicate);

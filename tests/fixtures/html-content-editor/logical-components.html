@@ -1,0 +1,60 @@
+<!-- Synthetic logical groups fixture -->
+<style>
+  #sample-cards .sample-layout { display: grid; gap: 12px; }
+  #sample-cards [data-sample-card] { border: 1px solid; padding: 8px; }
+  #sample-cards [inert] { display: none; }
+  #sample-cards img { width: 32px; height: 24px; object-fit: contain; }
+  #sample-cards > img, #sample-cards button img { width: 16px; height: 16px; }
+  @media (max-width: 639px) {
+    #sample-cards [data-sample-card="pond"] { order: -1; }
+  }
+</style>
+<section id="sample-cards" aria-labelledby="sample-heading">
+  <img src="/favicon.svg" alt="" aria-hidden="true">
+  <header><h2 id="sample-heading">Sample cards</h2><p>Introduction</p></header>
+  <div class="sample-layout">
+    <article data-sample-card="grove">
+      <div>
+        <div id="grove-front">
+          <h3>Grove front</h3>
+          <picture><source media="(max-width: 639px)" srcset="/favicon.svg"><img src="data:image/webp;base64,UklGRi4AAABXRUJQVlA4ICIAAABQAQCdASoIAAYAAUAmJQBOgDfQAP6uF9feUOxSi5P0RgAA" alt="Grove picture"></picture>
+          <button type="button" aria-label="Flip Grove" aria-controls="grove-back"><img src="/favicon.svg" alt=""></button>
+        </div>
+        <div id="grove-back" inert aria-hidden="true">
+          <img src="data:image/webp;base64,UklGRi4AAABXRUJQVlA4ICIAAABQAQCdASoIAAYAAUAmJQBOgDfQAP6uF9feUOxSi5P0RgAA" alt="Grove reverse">
+          <h3>Grove back</h3><p>Grove <em>description</em>.</p>
+          <button type="button" aria-label="Return Grove" aria-controls="grove-front"><img src="/favicon.svg" alt=""></button>
+        </div>
+      </div>
+    </article>
+    <figure><img src="data:image/webp;base64,UklGRi4AAABXRUJQVlA4ICIAAABQAQCdASoIAAYAAUAmJQBOgDfQAP6uF9feUOxSi5P0RgAA" alt="Standalone picture"></figure>
+    <article data-sample-card="pond">
+      <div id="pond-front">
+        <h3>Pond front</h3><img src="data:image/webp;base64,UklGRi4AAABXRUJQVlA4ICIAAABQAQCdASoIAAYAAUAmJQBOgDfQAP6uF9feUOxSi5P0RgAA" alt="Pond picture">
+        <button type="button" aria-label="Flip Pond" aria-controls="pond-back"><img src="/favicon.svg" alt=""></button>
+      </div>
+      <div id="pond-back" inert aria-hidden="true">
+        <img src="data:image/webp;base64,UklGRi4AAABXRUJQVlA4ICIAAABQAQCdASoIAAYAAUAmJQBOgDfQAP6uF9feUOxSi5P0RgAA" alt="Pond reverse">
+        <h3>Pond back</h3><p>Pond description.</p>
+        <button type="button" aria-label="Return Pond" aria-controls="pond-front"><img src="/favicon.svg" alt=""></button>
+      </div>
+    </article>
+    <article>
+      <div id="ambiguous-face"><h3>Ambiguous front</h3><button aria-controls="ambiguous-face" aria-label="Ambiguous forward"></button></div>
+      <div id="ambiguous-face" inert><h3>Ambiguous back</h3><button aria-controls="ambiguous-face" aria-label="Ambiguous back"></button></div>
+    </article>
+  </div>
+</section>
+<script>
+  document.querySelectorAll('#sample-cards [data-sample-card] button[aria-controls]').forEach(button => {
+    button.addEventListener('click', () => {
+      const side = button.parentElement;
+      const next = document.getElementById(button.getAttribute('aria-controls'));
+      side.inert = true;
+      side.setAttribute('aria-hidden', 'true');
+      next.inert = false;
+      next.setAttribute('aria-hidden', 'false');
+      next.querySelector('button').focus({ preventScroll: true });
+    });
+  });
+</script>
