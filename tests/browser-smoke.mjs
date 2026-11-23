@@ -1342,7 +1342,7 @@ async function main() {
       '\nPASS applies only to the named assertions. Real Yandex SDK revocation and browser fallback are NOT TESTED. No screenshots, HTML or downloads are uploaded.\n'];
     await appendFile(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
   }
-  assert.ok(results.filter(r => r.status === 'PASS').length === 5 && !results.some(r => r.status === 'FAIL'),
+  assert.ok(results.filter(r => r.status === 'PASS').length === 6 && !results.some(r => r.status === 'FAIL'),
     'Mandatory browser smoke scenarios did not all pass');
 }
 
