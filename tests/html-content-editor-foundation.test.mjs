@@ -126,7 +126,7 @@ test("editor chrome uses blue Editor theme tokens and shared V2 geometry and One
   assert.doesNotMatch(css, /box-shadow:\s*0\s+\d/);
 });
 
-test("V2 code actions keep 44px height, soft active lock, danger trash and conditional dirty COPY", () => {
+test("V2 code actions keep 44px height, soft active lock, danger trash and Preview copy styling", () => {
   const css = HTML_CONTENT_EDITOR_STYLES_SOURCE;
   assert.match(css, /--code-action-height:\s*44px/);
   assert.match(css, /\.addCodeButton\s*\{[^}]*min-height: var\(--code-action-height, 44px\);/);
@@ -136,7 +136,7 @@ test("V2 code actions keep 44px height, soft active lock, danger trash and condi
   assert.ok(HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('aria-pressed={field.locked}'));
   assert.match(HTML_CONTENT_EDITOR_COMPONENT_SOURCE, /className=\{styles.addCodeButton\}[^\n]*>\+ ДОБАВИТЬ БЛОК/);
   assert.match(css, /\.contentActions \.primaryButton\s*\{[^}]*background: var\(--ui-accent\);/);
-  assert.match(HTML_CONTENT_EDITOR_COMPONENT_SOURCE, /hasChanges \? <button[^>]*className=\{styles.primaryButton\}/);
+  assert.match(css, /\.contentActions button\s*\{[^}]*min-height: var\(--code-action-height, 44px\);/);
 });
 
 test("Content fields use complete neutral borders, soft selection and neutral scrollbars", () => {
@@ -1919,17 +1919,19 @@ test("ambiguous cross-format replacement and br changes cannot mutate source", (
   }
 });
 
-test("code actions share the 44px token and copy belongs to dirty Content only", () => {
+test("Preview code actions preserve per-block dirty and validation guards", () => {
   const css = readFileSync(new URL('../app/components/html-content-editor/HtmlContentEditor.module.css', import.meta.url), 'utf8');
   assert.match(css, /--code-action-height:\s*44px/);
   assert.match(css, /\.codeActionRow \.secondaryButton,[\s\S]*height: var\(--code-action-height\)/);
   assert.match(css, /\.codeIconButton \{[^}]*width: var\(--code-action-height, 44px\);[^}]*height: var\(--code-action-height, 44px\)/);
   for (const state of ['hover', 'active', 'focus-visible']) assert.ok(css.includes('.codeIconButton:' + state));
-  assert.match(HTML_CONTENT_EDITOR_COMPONENT_SOURCE, /hasChanges \? <button[^>]*className=\{styles.primaryButton\}/);
-  assert.ok(HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('disabled={hasInvalidContent || blockingValidationIssues.length > 0}'));
-  assert.ok(HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('navigator.clipboard.writeText(exportBlock(block))'));
-  assert.ok(HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('setTimeout(() => setCopyFeedback(""), 1800)'));
-  assert.ok(!HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('previewCopy'));
+  const source = HTML_CONTENT_EDITOR_COMPONENT_SOURCE;
+  assert.ok(source.includes('disabled={!hasChanges || hasInvalidContent || blockingValidationIssues.length > 0}'));
+  assert.ok(source.includes('onClick={resetChanges} disabled={!hasChanges && !hasInvalidContent}'));
+  assert.ok(source.includes('navigator.clipboard.writeText(exportBlock(block))'));
+  assert.ok(source.includes('copyFeedback?.block === block'));
+  assert.ok(source.includes('role="status" className={styles.copyFeedback}'));
+  assert.equal(source.split('СКОПИРОВАТЬ КОД БЛОКА').length - 1, 1);
   assert.ok(HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('aria-label="Удалить этот код"'));
   assert.ok(HTML_CONTENT_EDITOR_COMPONENT_SOURCE.includes('><CodeTrashIcon /></button>'));
 });
@@ -1939,7 +1941,9 @@ test("Editor-owned VideoGallery follows page preview outside iframe without alte
   const source = HTML_CONTENT_EDITOR_COMPONENT_SOURCE;
   const workspace = source.slice(source.indexOf('<section className={styles.workspace}'));
   assert.ok(workspace.indexOf('sandbox="allow-scripts"') >= 0);
-  assert.ok(workspace.indexOf("<VideoGallery") > workspace.indexOf('sandbox="allow-scripts"'));
+  const actions = workspace.indexOf('ref={setCodeActionsTarget}');
+  assert.ok(actions > workspace.indexOf('sandbox="allow-scripts"'));
+  assert.ok(workspace.indexOf("<VideoGallery") > actions);
   assert.ok(workspace.indexOf("<VideoGallery") < workspace.indexOf('<div className={styles.blockStack}>'));
   assert.ok(workspace.includes('className={styles.previewFrame} ref={stageRef}'));
   assert.ok(workspace.includes('className={styles.rightPreviewColumn}'));

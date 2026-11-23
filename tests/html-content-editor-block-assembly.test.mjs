@@ -298,7 +298,7 @@ test("composite static JS template editing retains template syntax and parent ma
 });
 
 
-test("actual Content render shows one composite field and per-block dirty copy with invalid draft feedback", async () => {
+test("Content and Preview actions reflect each block’s dirty or invalid state", async () => {
   const ts = await import('typescript');
   const React = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
@@ -307,45 +307,60 @@ test("actual Content render shows one composite field and per-block dirty copy w
   const source = readFileSync(file, 'utf8');
   const ast = ts.createSourceFile('editor.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const names = [], bindings = [];
+  let pendingActions;
   for (const declaration of ast.statements.filter(ts.isImportDeclaration)) {
     const clause = declaration.importClause;
     if (!clause || clause.isTypeOnly) continue;
     const specifier = declaration.moduleSpecifier.text;
-    const module = specifier.endsWith('.css') ? { default: new Proxy({}, { get: (_, key) => key }) }
+    const imported = specifier.endsWith('.css') ? { default: new Proxy({}, { get: (_, key) => key }) }
       : await import(specifier.startsWith('.') ? new URL(specifier + '.ts', file).href : specifier);
-    if (clause.name) { names.push(clause.name.text); bindings.push(module.default); }
+    if (clause.name) { names.push(clause.name.text); bindings.push(imported.default); }
     for (const item of clause.namedBindings?.elements ?? []) if (!item.isTypeOnly) {
-      names.push(item.name.text); bindings.push(module[item.propertyName?.text ?? item.name.text]);
+      names.push(item.name.text);
+      bindings.push(item.name.text === "createPortal" ? children => { pendingActions = children; return null; } : imported[item.propertyName?.text ?? item.name.text]);
     }
   }
   const declarations = ast.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(ast)).join('\n') + '\nexport { BlockFields };';
   const output = ts.transpileModule(declarations, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
   new Function('exports', 'require', ...names, output)(exports, createRequire(import.meta.url), ...bindings);
-  const render = item => renderToStaticMarkup(React.createElement(exports.BlockFields, { block: item, index: 0, selected: null, onChange() {}, send() {} }));
+  const render = item => {
+    pendingActions = null;
+    const content = renderToStaticMarkup(React.createElement(exports.BlockFields, {
+      block: item, index: 0, codeActionsTarget: {}, selected: null, onChange() {}, send() {},
+    }));
+    return { content, actions: renderToStaticMarkup(pendingActions) };
+  };
+  function assertActions({ content, actions }, copyDisabled, resetDisabled) {
+    assert.doesNotMatch(content, /СКОПИРОВАТЬ КОД БЛОКА|>Сбросить<\/button>/);
+    assert.match(actions, /id="[^"]+-code-actions-label">Блок 1<\/strong>/);
+    assert.equal(actions.includes('class="primaryButton" disabled=""'), copyDisabled);
+    assert.equal(actions.includes('class="secondaryButton" disabled=""'), resetDisabled);
+    assert.match(actions, /class="primaryButton"[^>]*>СКОПИРОВАТЬ КОД БЛОКА<\/button>/);
+    assert.match(actions, /class="secondaryButton"[^>]*>Сбросить<\/button>/);
+  }
   const item = block('a', ['<h2>Before<br>text <span class="accent">Accent</span> after</h2>']);
   const entity = extractEditableEntities(assembleBlock(item).source)[0];
   const clean = render(item);
-  assert.equal((clean.match(/<textarea/g) ?? []).length, 1);
-  assert.ok(!clean.includes('copyBlockCode'));
-  assert.ok(!clean.includes('disabled="" class="primaryButton"'));
+  assert.equal((clean.content.match(/<textarea/g) ?? []).length, 1);
+  assertActions(clean, true, true);
   const key = editorEntityKey(item.id, entity.id);
   item.values[key] = entity.displayValue.replace('Accent', 'Changed');
   const dirty = render(item);
-  assert.equal((dirty.match(/class="primaryButton"/g) ?? []).length, 1);
-  assert.ok(dirty.includes('Before\ntext Changed after'));
+  assertActions(dirty, false, false);
+  assert.ok(dirty.content.includes('Before\ntext Changed after'));
   const other = block('b', ['<p>Untouched</p>']);
-  assert.equal((render(other).match(/class="primaryButton"/g) ?? []).length, 0);
+  assertActions(render(other), true, true);
   item.values[key + '::valid'] = item.values[key];
   item.values[key] = 'Before\nCompletely replaced';
   const invalid = render(item);
-  assert.ok(invalid.includes('aria-invalid="true"'));
-  assert.ok(invalid.includes('Before\nCompletely replaced'));
-  assert.match(invalid, /class="primaryButton" disabled=""/);
-  assert.ok(invalid.includes('class="warningText"'));
+  assert.ok(invalid.content.includes('aria-invalid="true"'));
+  assert.ok(invalid.content.includes('Before\nCompletely replaced'));
+  assertActions(invalid, true, false);
+  assert.ok(invalid.content.includes('class="warningText"'));
   item.values[key] = entity.displayValue;
   delete item.values[key + '::valid'];
   const reverted = render(item);
-  assert.equal((reverted.match(/class="primaryButton"/g) ?? []).length, 0);
-  assert.ok(!reverted.includes('aria-invalid="true"'));
+  assertActions(reverted, true, true);
+  assert.ok(!reverted.content.includes('aria-invalid="true"'));
 });
