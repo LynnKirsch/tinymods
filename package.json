@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build --webpack",
+    "release:check": "node scripts/release-check.mjs",
     "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern .next --ignore-pattern out"
   },
