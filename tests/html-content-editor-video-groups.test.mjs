@@ -372,11 +372,12 @@ function fixtureRange(name, index, occurrence = 0) {
 
 const COMPONENT = readFileSync(new URL("../app/components/html-content-editor/HtmlContentEditor.tsx", import.meta.url), "utf8");
 const componentAst = ts.createSourceFile("editor.tsx", COMPONENT, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const helperNames = ["intrinsicFrameStyle", "resetVideoElement", "startVideoPreview", "observeVideoPreview", "bindVideoDialog", "composeVideoStories", "centeredRailScrollLeft", "videoPreviewEntries", "VideoThumbnail", "VideoGallery", "VideoModal"];
+const helperNames = ["intrinsicFrameStyle", "resetVideoElement", "createVideoPreviewQueue", "videoRangeTotal", "fetchVideoPreviewClip", "loadVideoPreviewSource", "startVideoPreview", "observeVideoPreview", "bindVideoDialog", "composeVideoStories", "centeredRailScrollLeft", "videoPreviewEntries", "VideoThumbnail", "VideoGallery", "VideoModal"];
 const helperCode = componentAst.statements.filter(node => ts.isFunctionDeclaration(node) && helperNames.includes(node.name?.text)).map(node => node.getText(componentAst)).join("\n");
 function presentationHelpers(overrides = {}) {
   return new Function("React", "useState", "useRef", "useEffect", "styles", "createPortal", "groupImageEntities", "linkedVideoEntities", "isVideoEntity", "videoPosterEntity", "extractEditableEntitiesWithVideoStories", "assembleBlock", "editorEntityKey",
-  ts.transpileModule(helperCode, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText + `;return {${helperNames.join(",")}};`)(
+  ts.transpileModule(helperCode, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText +
+    `;const queueVideoPreview = createVideoPreviewQueue(); return {${helperNames.join(",")}};`)(
   React, overrides.useState ?? useState, overrides.useRef ?? useRef, overrides.useEffect ?? useEffect, new Proxy({}, { get: (_, key) => key }), node => node,
   groupImageEntities, linkedVideoEntities, isVideoEntity, videoPosterEntity, extractEditableEntitiesWithVideoStories, assembleBlock, editorEntityKey);
 }
@@ -570,7 +571,7 @@ test("gallery SSR has seven lazy video elements outside iframe, selected card an
   assert.equal(chosen[1], trigger);
 });
 
-test("IntersectionObserver assigns src once on visibility and retains initialized video", () => {
+test("IntersectionObserver assigns a bounded preview source once on visibility", async () => {
   const previous = globalThis.IntersectionObserver;
   const observers = [];
   globalThis.IntersectionObserver = class {
@@ -579,7 +580,13 @@ test("IntersectionObserver assigns src once on visibility and retains initialize
     disconnect() { this.disconnected = true; }
   };
   const video = fakeVideo(); const states = []; const card = {};
-  const dispose = helpers.observeVideoPreview(video, card, "clip", state => states.push(state));
+  let loads = 0;
+  let releases = 0;
+  const dispose = helpers.observeVideoPreview(video, card, "clip", state => states.push(state), async source => {
+    loads++;
+    assert.equal(source, "clip");
+    return { url: "blob:preview", release: () => releases++ };
+  });
   const observer = observers[0];
   try {
     assert.equal(video.src, undefined);
@@ -587,13 +594,16 @@ test("IntersectionObserver assigns src once on visibility and retains initialize
     observer.callback([{ isIntersecting: false }]);
     assert.equal(video.loads, 0);
     observer.callback([{ isIntersecting: true }]);
-    assert.equal(video.src, "clip"); assert.equal(video.loads, 1);
+    await Promise.resolve();
+    assert.equal(video.src, "blob:preview"); assert.equal(video.loads, 1);
     observer.callback([{ isIntersecting: false }]); observer.callback([{ isIntersecting: true }]);
     assert.equal(video.loads, 1);
+    assert.equal(loads, 1);
     assert.equal(states.at(-1).phase, "loading");
   } finally { dispose(); globalThis.IntersectionObserver = previous; }
   assert.equal(video.src, undefined); assert.ok(video.pauses > 0);
   assert.equal(video.loads, 2);
+  assert.equal(releases, 1);
 });
 
 test("metadata, safe seek and paused decoded frames preserve portrait, landscape and square ratios", () => {
@@ -736,7 +746,7 @@ test("modal uses selected URL and real close/backdrop/Escape paths pause, reset 
   }
 });
 
-test("thumbnail drops poster for decoded frame, keeps explicit error fallback and invents none", () => {
+test("thumbnail keeps a provided poster and uses a frame only for unposted video", () => {
   const entry = helpers.videoPreviewEntries([block(VIDEO_FIXTURE_SOURCE)])[0];
   for (const phase of ["idle", "loading", "ready", "error"]) {
     const state = phase === "ready" ? { phase, width: 1920, height: 1080 } : { phase };
@@ -744,16 +754,61 @@ test("thumbnail drops poster for decoded frame, keeps explicit error fallback an
     const node = bound.VideoThumbnail({ source: entry.source, poster: entry.poster });
     const video = node.props.children[0];
     assert.equal(video.props.src, undefined);
-    assert.equal(video.props.poster, phase === "ready" ? undefined : entry.poster);
+    assert.equal(video.props.poster, entry.poster);
     assert.equal(video.props.autoPlay, undefined);
     assert.equal(video.props.muted, true);
     assert.equal(video.props.playsInline, true);
-    if (phase === "ready") assert.equal(node.props.style.aspectRatio, "1920 / 1080");
-    if (phase === "error") assert.equal(React.Children.toArray(node.props.children[1].props.children).find(child => React.isValidElement(child) && child.type === "img").props.src, entry.poster);
+    assert.equal(node.props["data-video-preview"], "poster");
     const noPoster = bound.VideoThumbnail({ source: entry.source });
-    assert.equal(Boolean(noPoster.props.children[1]), false);
+    assert.equal(noPoster.props["data-video-preview"], phase);
     assert.equal(noPoster.props.children[0].props.poster, undefined);
+    if (phase === "ready") assert.equal(noPoster.props.style.aspectRatio, "1920 / 1080");
   }
+  const bound = presentationHelpers({ useState: () => [{ phase: "idle" }, () => {}],
+    useRef: () => ({ current: {} }), useEffect: effect => effect() });
+  assert.doesNotThrow(() => bound.VideoThumbnail({ source: entry.source, poster: entry.poster }),
+    "poster skips creating the preview observer and video request");
+});
+
+test("thumbnail fetch reads at most a partial MP4 prefix and rejects a full response", async context => {
+  const fetch = context.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(options.credentials, "omit");
+    assert.equal(options.referrerPolicy, "no-referrer");
+    if (url.endsWith("not-range")) return new Response("not a media response");
+    const end = Number(options.headers.Range.split("-").at(-1));
+    const bytes = new Uint8Array(end + 1);
+    if (end > 8 && !url.endsWith("not-mp4")) bytes.set([102, 116, 121, 112], 4);
+    return new Response(bytes, { status: 206, headers: { "content-range": "bytes 0-" + end + "/900000" } });
+  });
+  const signal = new AbortController().signal;
+  const preview = await helpers.fetchVideoPreviewClip("https://cdn.example/movie.mp4", signal);
+  assert.equal(preview.type, "video/mp4");
+  assert.equal(preview.size, 512 * 1024);
+  assert.equal(await helpers.fetchVideoPreviewClip("https://www.dropbox.com/not-range", signal), undefined);
+  assert.equal(await helpers.fetchVideoPreviewClip("https://cdn.example/not-mp4", signal), undefined);
+  assert.deepEqual(fetch.mock.calls.map(call => call.arguments[1].headers.Range),
+    ["bytes=0-0", "bytes=0-524287", "bytes=0-0", "bytes=0-0", "bytes=0-524287"]);
+  assert.equal(fetch.mock.calls[2].arguments[0], "https://www.dropbox.com/not-range");
+});
+
+test("video preview queue limits concurrency and cancels pending work", async () => {
+  const enqueue = helpers.createVideoPreviewQueue();
+  const controllers = Array.from({ length: 4 }, () => new AbortController());
+  const started = [];
+  const finish = new Map();
+  const pending = controllers.map((controller, index) => enqueue(() => {
+    started.push(index);
+    return new Promise(resolve => finish.set(index, resolve));
+  }, controller.signal));
+  assert.deepEqual(started, [0, 1]);
+  controllers[2].abort();
+  assert.equal(await pending[2], undefined);
+  finish.get(0)(undefined);
+  await pending[0];
+  assert.deepEqual(started, [0, 1, 3]);
+  finish.get(1)(undefined);
+  finish.get(3)(undefined);
+  await Promise.all(pending);
 });
 
 test("unmounted never-visible card cannot initialize after a late observer callback", () => {

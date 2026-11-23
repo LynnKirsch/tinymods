@@ -244,6 +244,93 @@ function resetVideoElement(video: HTMLVideoElement) {
   video.load();
 }
 
+function createVideoPreviewQueue() {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const advance = () => { if (active < 2) waiting.shift()?.(); };
+
+  return (task: () => Promise<Blob | undefined>, signal: AbortSignal) =>
+    new Promise<Blob | undefined>(resolve => {
+      if (signal.aborted) { resolve(undefined); return; }
+      const start = async () => {
+        signal.removeEventListener("abort", cancel);
+        active++;
+        try { resolve(await task()); }
+        catch { resolve(undefined); }
+        finally { active--; advance(); }
+      };
+      function cancel() {
+        const index = waiting.indexOf(start);
+        if (index !== -1) waiting.splice(index, 1);
+        resolve(undefined);
+      }
+      waiting.push(start);
+      signal.addEventListener("abort", cancel, { once: true });
+      advance();
+    });
+}
+
+const queueVideoPreview = createVideoPreviewQueue();
+
+function videoRangeTotal(response: Response, end: number) {
+  const range = response.headers.get("content-range")?.match(/^bytes 0-(\d+)\/(\d+)$/i);
+  if (response.status !== 206 || !range || Number(range[1]) !== end) return undefined;
+  const total = Number(range[2]);
+  return Number.isSafeInteger(total) && total > end + 1 ? total : undefined;
+}
+
+async function fetchVideoPreviewClip(url: string, signal: AbortSignal) {
+  const range = (end: number) => fetch(url, {
+    headers: { Range: "bytes=0-" + end },
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    signal,
+  });
+  const probe = await range(0);
+  const total = videoRangeTotal(probe, 0);
+  void probe.body?.cancel().catch(() => {});
+  if (total === undefined || total < 13) return undefined;
+
+  // A fast-start MP4 can decode its first frame from a small, strictly partial range.
+  const end = Math.min(512 * 1024 - 1, total - 2);
+  const response = await range(end);
+  if (videoRangeTotal(response, end) !== total || !response.body) {
+    void response.body?.cancel().catch(() => {});
+    return undefined;
+  }
+
+  const bytes = new Uint8Array(end + 1);
+  const reader = response.body.getReader();
+  let offset = 0;
+  try {
+    while (offset < bytes.length) {
+      const { done, value } = await reader.read();
+      if (done || offset + value.length > bytes.length) return undefined;
+      bytes.set(value, offset);
+      offset += value.length;
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  if (String.fromCharCode(...bytes.subarray(4, 8)) !== "ftyp") return undefined;
+  return new Blob([bytes], { type: "video/mp4" });
+}
+
+type VideoPreviewSource = { url: string; release?: () => void };
+
+async function loadVideoPreviewSource(source: string, signal: AbortSignal): Promise<VideoPreviewSource | undefined> {
+  const url = new URL(source, document.baseURI);
+  if (url.protocol === "data:" || url.protocol === "blob:") return { url: url.href };
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return undefined;
+  const clip = await queueVideoPreview(
+    () => fetchVideoPreviewClip(url.href, AbortSignal.any([signal, AbortSignal.timeout(8000)])),
+    signal,
+  );
+  if (!clip || signal.aborted) return undefined;
+  const local = URL.createObjectURL(clip);
+  return { url: local, release: () => URL.revokeObjectURL(local) };
+}
+
 function startVideoPreview(video: HTMLVideoElement, source: string, update: (state: VideoPreviewState) => void) {
   let disposed = false;
   let failed = false;
@@ -300,19 +387,32 @@ function startVideoPreview(video: HTMLVideoElement, source: string, update: (sta
   };
 }
 
-function observeVideoPreview(video: HTMLVideoElement, card: HTMLElement, source: string, update: (state: VideoPreviewState) => void) {
+function observeVideoPreview(
+  video: HTMLVideoElement,
+  card: HTMLElement,
+  source: string,
+  update: (state: VideoPreviewState) => void,
+  load = loadVideoPreviewSource,
+) {
   let dispose: (() => void) | undefined;
+  let release: (() => void) | undefined;
+  const controller = new AbortController();
   let initialized = false;
-  let cancelled = false;
   const observer = new IntersectionObserver(entries => {
-    if (cancelled || initialized || !entries.some(entry => entry.isIntersecting)) return;
+    if (controller.signal.aborted || initialized || !entries.some(entry => entry.isIntersecting)) return;
     initialized = true;
     observer.disconnect();
-    if (source) dispose = startVideoPreview(video, source, update);
-    else update({ phase: "error" });
+    if (!source) { update({ phase: "error" }); return; }
+    update({ phase: "loading" });
+    void load(source, controller.signal).then(preview => {
+      if (controller.signal.aborted) { preview?.release?.(); return; }
+      if (!preview) { update({ phase: "error" }); return; }
+      release = preview.release;
+      dispose = startVideoPreview(video, preview.url, update);
+    }).catch(() => { if (!controller.signal.aborted) update({ phase: "error" }); });
   }, { threshold: 0.01 });
   observer.observe(card);
-  return () => { cancelled = true; observer.disconnect(); dispose?.(); };
+  return () => { controller.abort(); observer.disconnect(); dispose?.(); release?.(); };
 }
 
 function VideoThumbnail({ source, poster }: { source: string; poster?: string }) {
@@ -320,16 +420,12 @@ function VideoThumbnail({ source, poster }: { source: string; poster?: string })
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
-    if (!videoRef.current || !frameRef.current) return;
+    if (poster || !videoRef.current || !frameRef.current) return;
     return observeVideoPreview(videoRef.current, frameRef.current, source, setState);
-  }, [source]);
-  return <span ref={frameRef} className={styles.videoCardFrame} style={intrinsicFrameStyle(state.width, state.height, 300, 220)}>
-    <video ref={videoRef} muted playsInline preload="metadata" poster={state.phase === "ready" ? undefined : poster} aria-hidden="true" />
-    {state.phase === "error" && poster ? <>
-      {/* Explicit poster fallback only; a video URL is never passed to an image. */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={poster} alt="" />
-    </> : null}
+  }, [poster, source]);
+  return <span ref={frameRef} className={styles.videoCardFrame} data-video-preview={poster ? "poster" : state.phase}
+    style={intrinsicFrameStyle(state.width, state.height, 300, 220)}>
+    <video ref={videoRef} muted playsInline preload="metadata" poster={poster} aria-hidden="true" />
     <span className={styles.videoPlayIndicator} aria-hidden="true">▶</span>
     <span className={styles.videoFrameCaption}>{state.width && state.height
       ? `${state.width} × ${state.height}` : state.phase === "loading" ? "Загрузка…" : "Видео"}</span>
@@ -356,7 +452,7 @@ function VideoGallery({ entries, selectedKey, onOpen }: {
       {entries.map((entry, index) => <button type="button" key={entry.key} ref={node => { if (node) cardRefs.current.set(entry.key, node); else cardRefs.current.delete(entry.key); }} className={styles.videoCard}
         aria-pressed={selectedKey === entry.key} aria-label={`Открыть видео ${index + 1}`}
         onClick={event => onOpen(entry, event.currentTarget)}>
-        <VideoThumbnail key={`${entry.key}:${entry.source}`} source={entry.source} poster={entry.poster} />
+        <VideoThumbnail key={`${entry.key}:${entry.source}:${entry.poster ?? ""}`} source={entry.source} poster={entry.poster} />
         <span>{entry.sourceType?.startsWith("video/") ? entry.sourceType.slice(6).toUpperCase() : "Видео"} · {index + 1}</span>
       </button>)}
     </div>

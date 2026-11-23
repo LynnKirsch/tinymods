@@ -1011,6 +1011,90 @@ async function runCase(name, body, options = {}) {
   }
 }
 
+const smokeMediaRequests = [];
+const smokeImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jSFcAAAAASUVORK5CYII=', 'base64');
+// A synthetic 32×24 H.264 clip with its index at the start, generated using a solid-color FFmpeg input.
+const smokeClip = Buffer.from('AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMybW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAAZAAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAl10cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAAZAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAACAAAAAYAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAGQAAAAAAABAAAAAAHVbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAEABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABgG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUBzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAACAAGABIAAAASAAAAAAAAAABFUxhdmM2Mi4xMS4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAF2dCwAraJflwEQAAAwABAAADABQPEiagAQAEaM4PyAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAADLwAAAAAAAAABhzdHRzAAAAAAAAAAEAAAAEAAAEAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAEAAAAAQAAACRzdHN6AAAAAAAAAAAAAAAEAAACcQAAAAkAAAAJAAAACQAAABRzdGNvAAAAAAAAAAEAAANiAAAAYXVkdGEAAABZbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAsaWxzdAAAACSpdG9vAAAAHGRhdGEAAAABAAAAAExhdmY2Mi4zLjEwMAAAAAhmcmVlAAAClG1kYXQAAAJUBgX//1DcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MSBkZWJsb2NrPTA6MDowIGFuYWx5c2U9MDowIG1lPWRpYSBzdWJtZT0wIHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTAgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0wIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PTAgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEwIHNjZW5lY3V0PTAgaW50cmFfcmVmcmVzaD0wIHJjPWNyZiBtYnRyZWU9MCBjcmY9MjMuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0wAIAAAAAVZYiEOhGKAAIxccAAQ8o4AAgFyddeAAAABUGaIDKLAAAABUGaQDaLAAAABUGaYDaL', 'base64');
+const smokeMovie = Buffer.alloc(768 * 1024);
+smokeClip.copy(smokeMovie);
+smokeMovie.writeUInt32BE(smokeMovie.length - smokeClip.length, smokeClip.length);
+smokeMovie.write('free', smokeClip.length + 4);
+
+function serveSmokeMedia(path, request, response) {
+  if (!path.startsWith('/__smoke_media/')) return false;
+  const range = request.headers.range ?? null;
+  smokeMediaRequests.push({ path, method: request.method, range });
+  if (path.endsWith('/image.png')) {
+    response.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': smokeImage.length });
+    response.end(request.method === 'HEAD' ? undefined : smokeImage);
+  } else if (path.endsWith('/movie.mp4')) {
+    const match = range?.match(/^bytes=0-(\d+)$/);
+    if (!match) {
+      response.writeHead(400).end();
+    } else {
+      const end = Number(match[1]);
+      assert.ok(end >= 0 && end < smokeMovie.length - 1);
+      response.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Length': end + 1,
+        'Content-Range': 'bytes 0-' + end + '/' + smokeMovie.length });
+      response.end(smokeMovie.subarray(0, end + 1));
+    }
+  } else {
+    response.writeHead(200, { 'Content-Type': 'text/html' }).end('<p>Provider download page</p>');
+  }
+  return true;
+}
+
+async function editorMediaScenario(page) {
+  await page.navigate('/html-content-editor/');
+  await page.clickText('Только необходимые', 'document.querySelector(".cookie-consent")');
+  await page.wait(() => !document.querySelector('.cookie-consent'), 'Media editor consent dismissed');
+  const location = origin + '/__smoke_media/';
+  const image = location + 'image.png';
+  await page.fn(source => {
+    const original = performance.getEntriesByName.bind(performance);
+    performance.getEntriesByName = (name, type) => name === source ? [] : original(name, type);
+  }, image);
+  const source = '<section><h2>Synthetic media</h2><img src="' + image + '"><img src="' + image + '">' +
+    '<video preload="none" src="' + location + 'movie.mp4"></video>' +
+    '<video preload="none" src="' + location + 'posted.mp4" poster="' + image + '"></video>' +
+    '<video preload="none" src="' + location + 'provider.mp4"></video></section>';
+  await page.fill('#block-1-fragment-1', source);
+  await page.clickText('Загрузить код', 'document.querySelector("#block-1-fragment-1").parentElement');
+  await until(() => page.fn((source, bytes) => {
+    const previews = [...document.querySelectorAll('[data-content-scroll] [data-media-preview]')]
+      .filter(element => element.querySelector('img')?.getAttribute('src') === source);
+    for (const preview of previews) {
+      if (preview.dataset.mediaPreview === 'loading') preview.scrollIntoView({ block: 'nearest' });
+    }
+    return previews.filter(preview => preview.textContent.includes(bytes + ' B') &&
+      preview.textContent.includes('1 × 1 px')).length >= 2;
+  }, image, smokeImage.length), 'Image size, dimensions and shared HEAD in Content');
+  assert.equal(smokeMediaRequests.filter(request => request.path.endsWith('/image.png') && request.method === 'HEAD').length, 1);
+
+  const gallery = 'section[aria-label="Предпросмотр видео"]';
+  await page.wait(() => document.querySelectorAll('section[aria-label="Предпросмотр видео"] button').length === 3, 'Three gallery cards');
+  await page.fn(selector => document.querySelector(selector).scrollIntoView({ block: 'center' }), gallery);
+  await page.wait(() => {
+    const frame = document.querySelector('[aria-label="Открыть видео 1"] [data-video-preview="ready"]');
+    const video = frame?.querySelector('video');
+    return video?.paused && !video.autoplay && video.videoWidth === 32 && video.videoHeight === 24 &&
+      video.src.startsWith('blob:');
+  }, 'Ordinary MP4 decodes an editor frame from the bounded response');
+  assert.equal(await page.fn(() => {
+    const card = document.querySelector('[aria-label="Открыть видео 2"] [data-video-preview="poster"]');
+    return Boolean(card?.querySelector('video[poster]:not([src])'));
+  }), true, 'Poster avoids loading original video');
+  await page.fn(() => document.querySelector('[aria-label="Открыть видео 3"]').scrollIntoView({ block: 'center', inline: 'center' }));
+  await page.wait(() => Boolean(document.querySelector('[aria-label="Открыть видео 3"] [data-video-preview="error"] video:not([src])')),
+    'Provider page without partial media response shows placeholder');
+  assert.deepEqual(smokeMediaRequests.filter(request => request.path.endsWith('/movie.mp4')).map(request => request.range),
+    ['bytes=0-0', 'bytes=0-524287']);
+  assert.equal(smokeMediaRequests.filter(request => request.path.endsWith('/posted.mp4')).length, 0);
+  assert.deepEqual(smokeMediaRequests.filter(request => request.path.endsWith('/provider.mp4')).map(request => request.range), ['bytes=0-0']);
+  page.healthy();
+  return { imageBytes: smokeImage.length, sharedHeadRequests: 1, partialVideoBytes: 512 * 1024, decodedFrame: '32 × 24', posterAndFallback: true };
+}
+
 const mime = { '.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
   '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css',
   '.wasm': 'application/wasm', '.json': 'application/json', '.webmanifest': 'application/manifest+json',
@@ -1023,6 +1107,7 @@ async function startServer() {
   server = createServer(async (request, response) => {
     try {
       const path = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+      if (serveSmokeMedia(path, request, response)) return;
       let file = resolve(root, '.' + path);
       if (!file.startsWith(root + sep) && file !== root) throw Error('path outside export');
       let info;
@@ -1122,6 +1207,7 @@ async function main() {
     await runCase('Image Optimizer: JPEG/Q65/AVIF/Worker/download', imageScenario, { workers: true });
     await runCase('Image Optimizer: individual and batch scope', batchScenario, { workers: true });
     await runCase('HTML Editor: load/edit/Preview/clipboard', editorScenario);
+    await runCase('HTML Editor: cached image bytes and bounded video thumbnails', editorMediaScenario);
     await runCase('Shell navigation and help', shellScenario);
     await runCase('Consent UI with intercepted local probe SDK', consentScenario, { analytics: true });
     results.push({ name: 'Browser AVIF fallback fault injection', status: 'NOT TESTED',

@@ -2029,7 +2029,7 @@ test("video presentation is lazy, source-isolated and uses Editor modal accessib
   const source = HTML_CONTENT_EDITOR_COMPONENT_SOURCE;
   assert.ok(source.includes('new IntersectionObserver'));
   assert.ok(source.includes('observer.disconnect()'));
-  assert.ok(source.includes('key={`${entry.key}:${entry.source}`}'));
+  assert.ok(source.includes('key={`${entry.key}:${entry.source}:${entry.poster ?? ""}`}'));
   assert.ok(source.includes('!disposed && !failed && video.getAttribute("src") === source'));
   assert.ok(source.includes('video.videoWidth'));
   assert.ok(source.includes('video.videoHeight'));
@@ -2037,7 +2037,8 @@ test("video presentation is lazy, source-isolated and uses Editor modal accessib
   assert.ok(source.includes('<video ref={videoRef} muted playsInline preload="metadata"'));
   assert.ok(source.includes('<video ref={videoRef} controls playsInline preload="metadata"'));
   const presentation = source.slice(source.indexOf("type VideoPreviewState"), source.indexOf("type BlockFieldsProps"));
-  assert.doesNotMatch(presentation, /fetch\(|\.blob\(|canvas|autoPlay|autoplay|\.play\(/);
+  assert.doesNotMatch(presentation, /\.blob\(|canvas|autoPlay|autoplay|\.play\(/);
+  assert.ok(presentation.includes('headers: { Range: "bytes=0-" + end }'));
   assert.ok(presentation.includes('data-ui-theme="editor"'));
   assert.ok(presentation.includes('role="dialog" aria-modal="true"'));
   assert.ok(presentation.includes('event.key === "Escape"'));
@@ -2045,7 +2046,7 @@ test("video presentation is lazy, source-isolated and uses Editor modal accessib
   assert.ok(presentation.includes('trigger.focus()'));
   assert.ok(presentation.includes('resetVideoElement(video); restoreFocus()'));
   assert.ok(presentation.includes('event.target === event.currentTarget'));
-  assert.ok(presentation.includes('state.phase === "ready" ? undefined : poster'));
+  assert.ok(presentation.includes('if (poster || !videoRef.current || !frameRef.current) return'));
   const videoStyles = HTML_CONTENT_EDITOR_STYLES_SOURCE.slice(HTML_CONTENT_EDITOR_STYLES_SOURCE.indexOf("/* Editor-owned media presentation"));
   assert.doesNotMatch(videoStyles, /#[0-9a-f]{3,8}\b|gradient/i);
   assert.ok(videoStyles.includes("var(--ui-accent-soft)"));
