@@ -33,6 +33,8 @@ import {
   imageFormatFromSource,
   imageMetadataLine,
   imageOrientation,
+  imageTimingBytes,
+  requestImageFileBytes,
   type ImageMetadata,
 } from "../../lib/html-content-editor/image-metadata";
 import { validateRequiredImageValues } from "../../lib/html-content-editor/image-validation";
@@ -418,16 +420,23 @@ function IntrinsicImagePreview({ source, video }: { source: string; video: boole
         <img className={styles.imagePreview} src={source} loading="lazy" decoding="async"
           referrerPolicy="no-referrer" alt="" onLoad={event => {
             const image = event.currentTarget;
-            const timing = performance.getEntriesByName(image.currentSrc).findLast(
-              (entry): entry is PerformanceResourceTiming => entry.entryType === "resource" && "decodedBodySize" in entry,
+            const url = image.currentSrc;
+            const timing = performance.getEntriesByName(url, "resource").findLast(
+              (entry): entry is PerformanceResourceTiming => "initiatorType" in entry && entry.initiatorType === "img",
             );
-            setMetadata({
+            const facts: ImageMetadata = {
               status: "ready",
               format: imageFormatFromSource(source),
-              width: event.currentTarget.naturalWidth,
-              height: event.currentTarget.naturalHeight,
-              bytes: /^data:image\//i.test(source) ? byteSizeFromDataUrl(source) : timing?.decodedBodySize || undefined,
-            });
+              width: image.naturalWidth,
+              height: image.naturalHeight,
+              bytes: /^data:image\//i.test(source) ? byteSizeFromDataUrl(source) : imageTimingBytes(timing),
+            };
+            setMetadata(facts);
+            if (facts.bytes === undefined && url) {
+              void requestImageFileBytes(url).then(bytes => {
+                if (bytes !== undefined) setMetadata(current => current === facts ? { ...facts, bytes } : current);
+              });
+            }
           }} onError={() => setMetadata({ status: "unavailable", format: imageFormatFromSource(source) })} />
       ) : <span aria-hidden="true" className={styles.mediaPlaceholder}>{video ? "▶" : "▧"}</span>}
     </div>

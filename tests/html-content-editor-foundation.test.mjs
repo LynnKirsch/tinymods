@@ -10,7 +10,7 @@ import {
 } from "../app/lib/html-content-editor/encode-source-value.ts";
 import { extractEditableEntities } from "../app/lib/html-content-editor/extract-editable-entities.ts";
 import { groupImageEntities, isVideoEntity } from "../app/lib/html-content-editor/image-groups.ts";
-import { imageOrientation } from "../app/lib/html-content-editor/image-metadata.ts";
+import { imageOrientation, imageTimingBytes, requestImageFileBytes } from "../app/lib/html-content-editor/image-metadata.ts";
 import { validateRequiredImageValues } from "../app/lib/html-content-editor/image-validation.ts";
 import { visibleOutputSource } from "../app/lib/html-content-editor/output-code.ts";
 import { applySourcePatches } from "../app/lib/html-content-editor/patch-source.ts";
@@ -1951,6 +1951,39 @@ test("Editor-owned VideoGallery follows page preview outside iframe without alte
   assert.match(HTML_CONTENT_EDITOR_STYLES_SOURCE, /\.rightPreviewColumn\s*\{[^}]*position: sticky;[^}]*max-height: calc\(100dvh - 28px\);[^}]*overflow-y: auto;[^}]*display: flex;[^}]*flex-direction: column;/);
 });
 
+test("image byte counts use resource body sizes and ignore hidden or invalid values", () => {
+  assert.equal(imageTimingBytes({ decodedBodySize: 4096, encodedBodySize: 1024 }), 4096);
+  assert.equal(imageTimingBytes({ decodedBodySize: 0, encodedBodySize: 1024 }), 1024);
+  assert.equal(imageTimingBytes({ decodedBodySize: 0, encodedBodySize: 0, transferSize: 500 }), undefined);
+  assert.equal(imageTimingBytes({ decodedBodySize: -1, encodedBodySize: Infinity }), undefined);
+});
+
+test("image weight shares one HEAD request and never falls back to a full download", async context => {
+  const fetch = context.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(options.method, "HEAD");
+    assert.equal(options.credentials, "omit");
+    assert.equal(options.referrerPolicy, "no-referrer");
+    assert.ok(options.signal instanceof AbortSignal);
+    if (url.endsWith("/denied")) throw new TypeError("CORS");
+    if (url.endsWith("/invalid")) return new Response(null, { headers: { "content-length": "72xyz" } });
+    if (url.endsWith("/partial")) return new Response(null, { status: 206, headers: { "content-length": "100" } });
+    return new Response(null, { headers: { "content-length": "8192" } });
+  });
+  const first = requestImageFileBytes("https://assets.example/image.png?a=1#top");
+  const duplicate = requestImageFileBytes("https://assets.example/image.png?a=1");
+  assert.equal(first, duplicate);
+  assert.deepEqual(await Promise.all([first, duplicate]), [8192, 8192]);
+  assert.equal(await requestImageFileBytes("https://assets.example/image.png?a=2"), 8192);
+  for (const path of ["denied", "invalid", "partial"]) {
+    const url = "https://assets.example/" + path;
+    assert.equal(await requestImageFileBytes(url), undefined);
+    assert.equal(await requestImageFileBytes(url), undefined);
+  }
+  assert.equal(await requestImageFileBytes("data:image/png;base64,AAAA"), undefined);
+  assert.equal(await requestImageFileBytes("https://user:secret@assets.example/image.png"), undefined);
+  assert.equal(fetch.mock.callCount(), 5);
+});
+
 test("video story Content selection maps fields to the stable Video ID and only scrolls the horizontal gallery", () => {
   const source = HTML_CONTENT_EDITOR_COMPONENT_SOURCE;
   assert.ok(source.includes("...extractEditableEntitiesWithVideoStories(source)"));
@@ -1983,8 +2016,8 @@ test("both Content media paths use intrinsic image preview and exclude Video ima
   assert.match(thumbnail, /referrerPolicy="no-referrer"/);
   assert.doesNotMatch(thumbnail, /<video\b|<iframe\b|fetch\(/);
   assert.match(thumbnail, /Предпросмотр недоступен/);
-  assert.ok(source.includes("event.currentTarget.naturalWidth"));
-  assert.ok(source.includes("event.currentTarget.naturalHeight"));
+  assert.ok(source.includes("image.naturalWidth"));
+  assert.ok(source.includes("image.naturalHeight"));
   assert.ok(source.includes("aspectRatio: `${width} / ${height}`"));
   const css = HTML_CONTENT_EDITOR_STYLES_SOURCE;
   assert.doesNotMatch(css, /\.imagePreviewFrame\s*\{[^}]*(?:^|\n)\s*height: (?:136|112)px;/);

@@ -57,6 +57,52 @@ export function byteSizeFromDataUrl(source: string) {
   }
 }
 
+export function imageTimingBytes(timing?: Pick<PerformanceResourceTiming, "decodedBodySize" | "encodedBodySize">) {
+  return [timing?.decodedBodySize, timing?.encodedBodySize].find(bytes =>
+    typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes > 0);
+}
+
+const imageSizeCache = new Map<string, { bytes: Promise<number | undefined>; expires: number }>();
+
+export function requestImageFileBytes(source: string): Promise<number | undefined> {
+  let url: URL;
+  try { url = new URL(source); } catch { return Promise.resolve(undefined); }
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
+    return Promise.resolve(undefined);
+  }
+  url.hash = "";
+  const key = url.href;
+  const cached = imageSizeCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.bytes;
+  imageSizeCache.delete(key);
+  if (imageSizeCache.size >= 128) {
+    const oldest = imageSizeCache.keys().next().value;
+    if (oldest !== undefined) imageSizeCache.delete(oldest);
+  }
+
+  const bytes = (async () => {
+    try {
+      const response = await fetch(key, {
+        method: "HEAD",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.status !== 200) return undefined;
+      const length = response.headers.get("content-length");
+      if (!length || !/^\d+$/.test(length)) return undefined;
+      const value = Number(length);
+      return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const entry = { bytes, expires: Date.now() + 30_000 };
+  imageSizeCache.set(key, entry);
+  void bytes.then(value => { if (value !== undefined) entry.expires = Date.now() + 300_000; });
+  return bytes;
+}
+
 export function formatByteSize(bytes?: number) {
   if (!Number.isFinite(bytes)) return "вес недоступен";
   if (bytes! < 1024) return `${bytes} B`;
