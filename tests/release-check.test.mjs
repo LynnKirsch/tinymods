@@ -82,6 +82,24 @@ test('reports the exact release, every step and the real diff including a synthe
   assert.equal(output.at(-1), 'READY FOR RELEASE');
 });
 
+test('equal production and Verify reports no new changes after checking CI', async () => {
+  const { state, check, output } = scenario();
+  state.production = [candidate, candidate];
+  state.diff = '';
+  assert.equal(await check(), 0);
+  assert.equal(output.at(-1), 'NO NEW CHANGES — Verify already matches production');
+  assert.ok(!output.includes('READY FOR RELEASE'));
+});
+
+test('equal production and Verify still blocks an inaccessible API', async () => {
+  const { state, check, output } = scenario();
+  state.production = [candidate, candidate];
+  state.diff = '';
+  state.apiError = true;
+  assert.equal(await check(), 1);
+  assert.match(output.at(-1), /^BLOCKED — /);
+});
+
 for (const [name, setup, reason] of [
   ['remote SHA mismatch', ({ state }) => { state.remote[0] = other; }, /Remote Verify differs/],
   ['local SHA mismatch', ({ state }) => { state.local[0] = other; return [candidate]; }, /differs from local Verify/],

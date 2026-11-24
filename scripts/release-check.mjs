@@ -186,6 +186,10 @@ export async function releaseCheck(args, { git = readGit, api = readGitHub, writ
       throw new Error('Verify changed during the check');
     }
     write('Optima Verify: https://github.com/' + repository + '/actions/runs/' + run.id + '/attempts/' + run.run_attempt);
+    if (candidate === production) {
+      write('NO NEW CHANGES — Verify already matches production');
+      return 0;
+    }
     write('READY FOR RELEASE');
     return 0;
   } catch (error) {
