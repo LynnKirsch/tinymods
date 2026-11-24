@@ -52,6 +52,12 @@ jobs:
 
       # Separate steps remain sequential. Independent checks still report their
       # own failures after another check fails; no failure is marked successful.
+      - name: Release Preflight tests
+        id: release_preflight
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 5
+        run: node --test tests/release-check.test.mjs
+
       - name: Generate Next types and check TypeScript
         id: types
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -257,6 +263,7 @@ jobs:
           IMAGES: ${{ steps.images.outcome }}
           EDITOR: ${{ steps.editor.outcome }}
           EDITOR_FIXTURES: ${{ steps.editor_fixtures.outcome }}
+          RELEASE_PREFLIGHT: ${{ steps.release_preflight.outcome }}
           HELP: ${{ steps.help.outcome }}
           BUILD: ${{ steps.build.outcome }}
           ASSETS: ${{ steps.assets.outcome }}
@@ -269,6 +276,7 @@ jobs:
             printf '| Install | %s |\n| Types | %s |\n| AVIF options | %s |\n' "$INSTALL" "$TYPES" "$OPTIONS"
             printf '| AVIF Node/WASM tests | %s |\n| Image Optimizer | %s |\n| Navigation/help | %s |\n' "$AVIF" "$IMAGES" "$HELP"
             printf '| Editor core/repository | %s |\n| Editor fixture-dependent integration | %s |\n' "$EDITOR" "$EDITOR_FIXTURES"
+            printf '| Release Preflight tests | %s |\n' "$RELEASE_PREFLIGHT"
             printf '| Build | %s |\n| Exported assets | %s |\n| Selected Next HTML tests | %s |\n' "$BUILD" "$ASSETS" "$HTML"
             printf '\nChrome browser smoke step: %s. Per-scenario results are reported by tests/browser-smoke.mjs.\n' "$BROWSER"
             printf '\nBrowser limits: fallback fault injection and real Yandex SDK post-withdrawal behavior remain NOT TESTED. Consent uses a locally fulfilled probe SDK; all external probe attempts are cancelled before sending. This is not a full visual or sandbox security audit.\n'
